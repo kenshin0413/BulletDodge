@@ -3,38 +3,55 @@ import SpriteKit
 import Metal
 
 final class PlayerNode: SKNode {
+    static let menuPortraitImage: UIImage = {
+        let portraitRig = PlayerFigureRig()
+        portraitRig.resetPose()
+        portraitRig.update(deltaTime: 0, facingAngle: 0, movementStrength: 0)
+        return portraitRig.makePortrait()
+    }()
+
     private let shadowNode = SKShapeNode(
         ellipseOf: CGSize(
             width: GameConfig.tileSize * 0.72,
             height: GameConfig.tileSize * 0.34
         )
     )
+    private let groundIndicatorNode = SKNode()
+    private let healthBarNode = SKNode()
+    private let healthBarFillNode = SKShapeNode()
     private let modelNode = SK3DNode(viewportSize: GameConfig.playerModelViewportSize)
     private let figure = PlayerFigureRig()
-    private var hitMasks: [Int: PlayerAlphaHitMask] = [:]
 
     private(set) var velocity: CGVector = .zero
     private(set) var currentHP = GameConfig.playerMaxHP
 
-    private var facingAngle: CGFloat = 0
+    private var facingAngle: CGFloat = .pi
+    private var targetFacingAngle: CGFloat = .pi
+    private var isRateLimitedVelocityTransition = false
     private let debugFacingAngle = PlayerNode.loadDebugFacingAngle()
 
     override init() {
         super.init()
 
+        configureGroundIndicator()
+        configureHealthBar()
+
         shadowNode.position = CGPoint(x: 0, y: -28)
         shadowNode.fillColor = UIColor.black.withAlphaComponent(0.18)
         shadowNode.strokeColor = .clear
+        shadowNode.zPosition = -1
 
         modelNode.scnScene = figure.scene
         modelNode.pointOfView = figure.cameraNode
         let displayScale = GameConfig.playerModelDisplaySize.width / GameConfig.playerModelViewportSize.width
         modelNode.xScale = displayScale * GameConfig.playerModelWidthScale
         modelNode.yScale = displayScale * GameConfig.playerModelHeightScale
-        modelNode.position = CGPoint(x: 0, y: -4)
+        modelNode.position = CGPoint(x: 0, y: -8)
 
+        addChild(groundIndicatorNode)
         addChild(shadowNode)
         addChild(modelNode)
+        addChild(healthBarNode)
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -43,13 +60,17 @@ final class PlayerNode: SKNode {
 
     func reset() {
         velocity = .zero
+        isRateLimitedVelocityTransition = false
         currentHP = GameConfig.playerMaxHP
         alpha = 1
         setScale(1)
-        facingAngle = debugFacingAngle ?? 0
+        // Spawn facing toward the far side of the arena.
+        facingAngle = debugFacingAngle ?? .pi
+        targetFacingAngle = facingAngle
         figure.resetPose()
         figure.update(deltaTime: 0, facingAngle: facingAngle, movementStrength: 0)
         updateDirectionalHeight()
+        updateHealthBar()
     }
 
     func applyMovement(input: CGVector, deltaTime: TimeInterval, mapRect: CGRect) {
@@ -57,19 +78,20 @@ final class PlayerNode: SKNode {
         let facingInput = debugFacingAngle == nil ? movementInput : .zero
 
         if facingInput.length > 0.05 {
-            updateFacing(with: facingInput)
+            updateFacing(with: facingInput, deltaTime: deltaTime)
         } else if let debugFacingAngle {
             facingAngle = debugFacingAngle
+            targetFacingAngle = debugFacingAngle
         }
 
-        velocity = movementInput * GameConfig.playerSpeed
+        updateVelocity(with: movementInput, deltaTime: deltaTime)
         let delta = velocity * CGFloat(deltaTime)
         let nextPosition = CGPoint(x: position.x + delta.dx, y: position.y + delta.dy)
         position = nextPosition.clamped(
             in: mapRect.insetBy(dx: GameConfig.playerCollisionRadius, dy: GameConfig.playerCollisionRadius)
         )
 
-        let movementStrength: CGFloat = movementInput == .zero ? 0 : 1
+        let movementStrength = min(1, velocity.length / max(1, GameConfig.playerSpeed))
         figure.update(deltaTime: deltaTime, facingAngle: facingAngle, movementStrength: movementStrength)
         updateDirectionalHeight()
         shadowNode.xScale = 1 - movementStrength * 0.08
@@ -78,6 +100,7 @@ final class PlayerNode: SKNode {
 
     func takeDamage(_ damage: CGFloat) -> Bool {
         currentHP = max(0, currentHP - damage)
+        updateHealthBar()
 
         removeAction(forKey: "hitFlash")
         let flash = SKAction.sequence([
@@ -95,35 +118,161 @@ final class PlayerNode: SKNode {
         return currentHP <= 0
     }
 
-    /// Tests the actual rendered 3D character silhouette rather than the ground
-    /// ring, a rectangle, or a single ellipse.
-    func containsHitPoint(_ worldPoint: CGPoint) -> Bool {
-        let localPoint = CGPoint(
-            x: worldPoint.x - position.x,
-            y: worldPoint.y - position.y
-        )
-        let directionIndex = Self.directionIndex(for: facingAngle)
-        if hitMasks[directionIndex] == nil {
-            hitMasks[directionIndex] = figure.makeHitMask(directionIndex: directionIndex)
-        }
-        guard let hitMask = hitMasks[directionIndex] else { return false }
+    private func configureGroundIndicator() {
+        let size = GameConfig.playerGroundIndicatorSize
 
-        let pointInViewport = CGPoint(
-            x: (localPoint.x - modelNode.position.x)
-                / max(abs(modelNode.xScale) * GameConfig.playerHitMaskWidthScale, 0.001)
-                + GameConfig.playerModelViewportSize.width * 0.5,
-            y: (localPoint.y - modelNode.position.y)
-                / max(abs(modelNode.yScale) * GameConfig.playerHitMaskHeightScale, 0.001)
-                + GameConfig.playerModelViewportSize.height * 0.5
+        let outer = SKShapeNode(ellipseOf: size)
+        outer.fillColor = UIColor(red: 0.02, green: 0.11, blue: 0.18, alpha: 0.34)
+        outer.strokeColor = UIColor(red: 0.10, green: 0.88, blue: 0.84, alpha: 0.92)
+        outer.lineWidth = 2.4
+        outer.glowWidth = 1.2
+
+        let inner = SKShapeNode(
+            ellipseOf: CGSize(width: size.width * 0.72, height: size.height * 0.68)
         )
-        return hitMask.contains(
-            viewportPoint: pointInViewport,
-            viewportSize: GameConfig.playerModelViewportSize
+        inner.fillColor = .clear
+        inner.strokeColor = UIColor(red: 0.33, green: 0.55, blue: 0.98, alpha: 0.72)
+        inner.lineWidth = 1.35
+
+        groundIndicatorNode.position = CGPoint(
+            x: 0,
+            y: GameConfig.playerGroundIndicatorYOffset
+        )
+        groundIndicatorNode.zPosition = -2
+        groundIndicatorNode.addChild(outer)
+        groundIndicatorNode.addChild(inner)
+    }
+
+    private func configureHealthBar() {
+        let size = GameConfig.playerHealthBarSize
+        let backing = SKShapeNode(rectOf: size, cornerRadius: size.height * 0.48)
+        backing.fillColor = UIColor(red: 0.025, green: 0.055, blue: 0.10, alpha: 0.94)
+        backing.strokeColor = .clear
+
+        let fillSize = GameConfig.playerHealthBarFillSize
+        healthBarFillNode.path = CGPath(
+            roundedRect: CGRect(
+                x: -fillSize.width / 2,
+                y: -fillSize.height / 2,
+                width: fillSize.width,
+                height: fillSize.height
+            ),
+            cornerWidth: fillSize.height * 0.48,
+            cornerHeight: fillSize.height * 0.48,
+            transform: nil
+        )
+        healthBarFillNode.fillColor = UIColor(red: 0.08, green: 0.86, blue: 0.82, alpha: 1)
+        healthBarFillNode.strokeColor = .clear
+
+        let topGlint = SKShapeNode(
+            rectOf: CGSize(width: fillSize.width * 0.82, height: max(0.7, fillSize.height * 0.16)),
+            cornerRadius: fillSize.height * 0.12
+        )
+        topGlint.position = CGPoint(x: 0, y: fillSize.height * 0.20)
+        topGlint.fillColor = UIColor.white.withAlphaComponent(0.22)
+        topGlint.strokeColor = .clear
+        healthBarFillNode.addChild(topGlint)
+
+        healthBarNode.position = CGPoint(x: 0, y: GameConfig.playerHealthBarYOffset)
+        healthBarNode.zPosition = 4
+        healthBarNode.addChild(backing)
+        healthBarNode.addChild(healthBarFillNode)
+    }
+
+    private func updateHealthBar() {
+        let ratio = min(1, max(0, currentHP / max(1, GameConfig.playerMaxHP)))
+        let innerWidth = GameConfig.playerHealthBarFillSize.width
+        healthBarFillNode.xScale = max(0.001, ratio)
+        healthBarFillNode.position.x = -innerWidth * (1 - ratio) / 2
+
+        if ratio <= 0.25 {
+            healthBarFillNode.fillColor = UIColor(red: 0.98, green: 0.29, blue: 0.36, alpha: 1)
+        } else if ratio <= 0.50 {
+            healthBarFillNode.fillColor = UIColor(red: 1.00, green: 0.66, blue: 0.20, alpha: 1)
+        } else {
+            healthBarFillNode.fillColor = UIColor(red: 0.08, green: 0.86, blue: 0.82, alpha: 1)
+        }
+    }
+
+    var hitCenterWorld: CGPoint {
+        CGPoint(
+            x: position.x,
+            y: position.y + GameConfig.playerHitCenterYOffset
         )
     }
 
-    private func updateFacing(with input: CGVector) {
-        facingAngle = atan2(input.dx, -input.dy)
+    /// Collision is a fixed circle on the gameplay plane. It deliberately
+    /// ignores the projected head, limbs, facing angle and animation pose.
+    /// BulletNode separately enforces the required projectile overlap.
+    func containsHitPoint(_ worldPoint: CGPoint) -> Bool {
+        let center = hitCenterWorld
+        let deltaX = worldPoint.x - center.x
+        let deltaY = worldPoint.y - center.y
+        let radius = GameConfig.playerHitRadius
+        return deltaX * deltaX + deltaY * deltaY <= radius * radius
+    }
+
+    private func updateVelocity(with input: CGVector, deltaTime: TimeInterval) {
+        guard input != .zero else {
+            let maximumChange =
+                GameConfig.playerReleaseDeceleration * CGFloat(deltaTime)
+            if velocity.length <= maximumChange {
+                velocity = .zero
+            } else {
+                velocity = velocity + velocity.normalized * -maximumChange
+            }
+            isRateLimitedVelocityTransition = false
+            return
+        }
+
+        let desiredVelocity = input * GameConfig.playerSpeed
+        let difference = CGVector(
+            dx: desiredVelocity.dx - velocity.dx,
+            dy: desiredVelocity.dy - velocity.dy
+        )
+
+        if velocity.length < 0.001 {
+            isRateLimitedVelocityTransition = true
+        } else if !isRateLimitedVelocityTransition {
+            let denominator = velocity.length * desiredVelocity.length
+            if denominator > 0 {
+                let dotProduct = velocity.dx * desiredVelocity.dx
+                    + velocity.dy * desiredVelocity.dy
+                let cosine = min(
+                    1,
+                    max(-1, dotProduct / denominator)
+                )
+                if acos(cosine) >= GameConfig.playerHardTurnThreshold {
+                    isRateLimitedVelocityTransition = true
+                }
+            }
+        }
+
+        if !isRateLimitedVelocityTransition {
+            let response = CGFloat(
+                1 - exp(-deltaTime / GameConfig.playerSteeringResponseTime)
+            )
+            velocity = velocity + difference * response
+            return
+        }
+
+        let maximumChange = GameConfig.playerMovementAcceleration * CGFloat(deltaTime)
+        if difference.length <= maximumChange {
+            velocity = desiredVelocity
+            isRateLimitedVelocityTransition = false
+        } else {
+            velocity = velocity + difference.normalized * maximumChange
+        }
+    }
+
+    private func updateFacing(with input: CGVector, deltaTime: TimeInterval) {
+        targetFacingAngle = atan2(input.dx, -input.dy)
+        let difference = atan2(
+            sin(targetFacingAngle - facingAngle),
+            cos(targetFacingAngle - facingAngle)
+        )
+        let maximumChange = GameConfig.playerFacingTurnRate * CGFloat(deltaTime)
+        facingAngle += min(max(difference, -maximumChange), maximumChange)
     }
 
     private func updateDirectionalHeight() {
@@ -156,6 +305,12 @@ final class PlayerNode: SKNode {
         let displayScale = GameConfig.playerModelDisplaySize.width
             / GameConfig.playerModelViewportSize.width
         modelNode.yScale = displayScale * GameConfig.playerModelHeightScale * directionalScale
+
+        // The rear silhouette's visual foot anchor sits slightly above the
+        // rig origin. Ease it toward the player so the feet remain centered
+        // in the ground indicator while turning toward the far side.
+        let rearAlignment = (1 - cos(angleFromToward)) / 2
+        modelNode.position.y = -8 - 2.5 * rearAlignment
     }
 
     private static func loadDebugFacingAngle() -> CGFloat? {
@@ -169,77 +324,6 @@ final class PlayerNode: SKNode {
         return (CGFloat(min(max(index, 0), 23)) / 24) * .pi * 2
     }
 
-    private static func directionIndex(for angle: CGFloat) -> Int {
-        let fullTurn = CGFloat.pi * 2
-        let normalized = angle.truncatingRemainder(dividingBy: fullTurn)
-        let positive = normalized >= 0 ? normalized : normalized + fullTurn
-        return Int((positive / fullTurn * 24).rounded()) % 24
-    }
-
-}
-
-private struct PlayerAlphaHitMask {
-    private let width: Int
-    private let height: Int
-    private let alpha: [UInt8]
-
-    init(image: UIImage) {
-        guard let cgImage = image.cgImage else {
-            width = 1
-            height = 1
-            alpha = [0]
-            return
-        }
-
-        let imageWidth = cgImage.width
-        let imageHeight = cgImage.height
-        var pixels = [UInt8](repeating: 0, count: imageWidth * imageHeight * 4)
-        pixels.withUnsafeMutableBytes { storage in
-            guard let context = CGContext(
-                data: storage.baseAddress,
-                width: imageWidth,
-                height: imageHeight,
-                bitsPerComponent: 8,
-                bytesPerRow: imageWidth * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                    | CGBitmapInfo.byteOrder32Big.rawValue
-            ) else { return }
-            // Store row zero as the top row, matching the source PNG orientation.
-            context.translateBy(x: 0, y: CGFloat(imageHeight))
-            context.scaleBy(x: 1, y: -1)
-            context.draw(
-                cgImage,
-                in: CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
-            )
-        }
-        width = imageWidth
-        height = imageHeight
-        alpha = stride(from: 3, to: pixels.count, by: 4).map { pixels[$0] }
-        if GameConfig.debugProjectileLoggingEnabled {
-            let solidPixelCount = alpha.reduce(into: 0) { count, value in
-                if value >= 64 { count += 1 }
-            }
-            let coverage = CGFloat(solidPixelCount) / CGFloat(max(1, alpha.count))
-            NSLog("PLAYER HIT MASK solidCoverage=%.3f", coverage)
-            assert(
-                coverage > 0.001 && coverage < 0.50,
-                "The player hit mask must contain only the rendered character silhouette."
-            )
-        }
-    }
-
-    func contains(viewportPoint: CGPoint, viewportSize: CGSize) -> Bool {
-        guard width > 1, height > 1 else { return false }
-        let u = viewportPoint.x / viewportSize.width
-        let vFromBottom = viewportPoint.y / viewportSize.height
-        guard (0...1).contains(u), (0...1).contains(vFromBottom) else { return false }
-
-        let pixelX = min(width - 1, max(0, Int(u * CGFloat(width))))
-        let pixelY = min(height - 1, max(0, Int((1 - vFromBottom) * CGFloat(height))))
-        // Ignore the faint anti-aliased fringe and follow the visibly solid body.
-        return alpha[pixelY * width + pixelX] >= 64
-    }
 }
 
 private final class PlayerFigureRig {
@@ -264,6 +348,7 @@ private final class PlayerFigureRig {
     private let rightFootNode = SCNNode()
 
     private var walkPhase: CGFloat = 0
+    private var armSpinPhase: CGFloat = 0
     private lazy var hitMaskRenderer: SCNRenderer? = {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         let renderer = SCNRenderer(device: device, options: nil)
@@ -281,6 +366,7 @@ private final class PlayerFigureRig {
 
     func resetPose() {
         walkPhase = 0
+        armSpinPhase = 0
         rootNode.eulerAngles = SCNVector3(0, 0, 0)
         rootNode.position = SCNVector3(0, -0.36, 0)
         bodyNode.eulerAngles = SCNVector3(0, 0, 0)
@@ -300,6 +386,7 @@ private final class PlayerFigureRig {
         } else {
             walkPhase += CGFloat(deltaTime) * 2
         }
+        armSpinPhase += CGFloat(deltaTime) * (4.35 + clampedStrength * 0.45)
 
         let armSwing = sin(walkPhase) * 0.62 * clampedStrength
         let legSwing = sin(walkPhase) * 0.72 * clampedStrength
@@ -309,24 +396,73 @@ private final class PlayerFigureRig {
         bodyNode.position.y = 1.20 + Float(bodyBob)
         bodyNode.eulerAngles.z = Float(bodyRoll)
 
-        leftArmPivot.eulerAngles.x = Float(armSwing)
-        rightArmPivot.eulerAngles.x = Float(-armSwing)
+        leftArmPivot.eulerAngles.x = Float(armSwing * 0.70)
+        // Rotate around the local X axis so the hand travels forward, upward,
+        // backward and downward in a genuinely vertical overhand circle.
+        // Rotating around Z would sweep sideways across the body instead.
+        rightArmPivot.eulerAngles.x = Float(armSpinPhase)
+        rightArmPivot.eulerAngles.y = 0
+        rightArmPivot.eulerAngles.z = 0
         leftLegPivot.eulerAngles.x = Float(-legSwing)
         rightLegPivot.eulerAngles.x = Float(legSwing)
+
     }
 
-    func makeHitMask(directionIndex: Int) -> PlayerAlphaHitMask? {
-        guard let renderer = hitMaskRenderer else { return nil }
-        let previousYaw = rootNode.eulerAngles.y
-        rootNode.eulerAngles.y = Float(CGFloat(directionIndex) / 24 * .pi * 2)
+    func makePortrait() -> UIImage {
+        guard let renderer = hitMaskRenderer else { return UIImage() }
         SCNTransaction.flush()
         let image = renderer.snapshot(
             atTime: 0,
             with: GameConfig.playerModelViewportSize,
             antialiasingMode: .multisampling4X
         )
-        rootNode.eulerAngles.y = previousYaw
-        return PlayerAlphaHitMask(image: image)
+        return cropTransparentPadding(from: image)
+    }
+
+    private func cropTransparentPadding(from image: UIImage) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        let width = cgImage.width
+        let height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { storage in
+            guard let context = CGContext(
+                data: storage.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue
+            ) else { return }
+            context.translateBy(x: 0, y: CGFloat(height))
+            context.scaleBy(x: 1, y: -1)
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+
+        var minX = width
+        var minY = height
+        var maxX = 0
+        var maxY = 0
+        for y in 0..<height {
+            for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 8 {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+
+        guard minX <= maxX, minY <= maxY else { return image }
+        let padding = 8
+        let cropRect = CGRect(
+            x: max(0, minX - padding),
+            y: max(0, minY - padding),
+            width: min(width - 1, maxX + padding) - max(0, minX - padding) + 1,
+            height: min(height - 1, maxY + padding) - max(0, minY - padding) + 1
+        )
+        guard let croppedImage = cgImage.cropping(to: cropRect) else { return image }
+        return UIImage(cgImage: croppedImage, scale: image.scale, orientation: .up)
     }
 
     private func configureCamera() {
@@ -336,8 +472,10 @@ private final class PlayerFigureRig {
         camera.zNear = 0.01
         camera.zFar = 20
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, 3.42, 2.58)
-        cameraNode.eulerAngles = SCNVector3(-0.72, 0, 0)
+        // Five degrees steeper than the previous view. Move along the same
+        // camera orbit so the character's screen-space size stays stable.
+        cameraNode.position = SCNVector3(0, 3.636, 2.373)
+        cameraNode.eulerAngles = SCNVector3(-0.8073, 0, 0)
         scene.rootNode.addChildNode(cameraNode)
     }
 
@@ -345,135 +483,158 @@ private final class PlayerFigureRig {
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.intensity = 520
-        ambient.light?.color = UIColor(white: 0.94, alpha: 1)
+        ambient.light?.intensity = 620
+        ambient.light?.color = UIColor(white: 0.88, alpha: 1)
         scene.rootNode.addChildNode(ambient)
 
         let key = SCNNode()
         key.light = SCNLight()
         key.light?.type = .omni
-        key.light?.intensity = 900
+        key.light?.intensity = 650
+        key.light?.color = UIColor(white: 0.95, alpha: 1)
         key.position = SCNVector3(1.6, 5.2, 2.2)
         scene.rootNode.addChildNode(key)
+
+        // A restrained back light separates the black silhouette from the map
+        // without creating the wet/plastic gloss of the previous version.
+        let rim = SCNNode()
+        rim.light = SCNLight()
+        rim.light?.type = .omni
+        rim.light?.intensity = 150
+        rim.light?.color = UIColor(red: 0.42, green: 0.53, blue: 0.68, alpha: 1)
+        rim.position = SCNVector3(-2.4, 3.4, -2.2)
+        scene.rootNode.addChildNode(rim)
     }
 
     private func configureFigure() {
         scene.rootNode.addChildNode(rootNode)
         rootNode.position = SCNVector3(0, -0.36, 0)
 
-        // Original dusk-fox. Head, torso, limbs and tail are independent
-        // volumes, giving the character real gaps, shadows and depth.
-        let coat = UIColor(red: 0.075, green: 0.085, blue: 0.105, alpha: 1)
-        let outerFur = UIColor(red: 0.12, green: 0.13, blue: 0.15, alpha: 1)
-        let paleFur = UIColor(red: 0.48, green: 0.45, blue: 0.38, alpha: 1)
+        // Silverback proportions from the supplied reference: a forward-set
+        // head, high sloping shoulders, tapered waist, very long heavy arms and
+        // short planted legs. The body remains in the calibrated 6.5 x 4.5 mm
+        // envelope; the visual-only flail is deliberately outside that box.
+        let blackFur = UIColor(red: 0.335, green: 0.345, blue: 0.365, alpha: 1)
+        let liftedFur = UIColor(red: 0.455, green: 0.465, blue: 0.485, alpha: 1)
+        let bareSkin = UIColor(red: 0.500, green: 0.495, blue: 0.480, alpha: 1)
+        let chestSkin = UIColor(red: 0.555, green: 0.550, blue: 0.525, alpha: 1)
 
-        bodyNode.geometry = SCNCapsule(capRadius: 0.33, height: 1.10)
-        bodyNode.geometry?.firstMaterial = material(color: coat)
-        // Give the player a fuller torso from every angle. Depth is increased
-        // more strongly so the side-on silhouette remains satisfyingly broad.
-        bodyNode.scale = SCNVector3(1.08, 0.94, 1.18)
-        bodyNode.position = SCNVector3(0, 1.14, 0)
+        bodyNode.geometry = SCNCone(topRadius: 0.43, bottomRadius: 0.27, height: 0.96)
+        bodyNode.geometry?.firstMaterial = material(color: blackFur)
+        // Extra depth is only exposed when the rig turns sideways, making the
+        // side silhouette fuller without widening the front view.
+        bodyNode.scale = SCNVector3(1.06, 0.96, 1.02)
+        bodyNode.position = SCNVector3(0, 1.20, 0)
         rootNode.addChildNode(bodyNode)
 
-        let neck = SCNNode(geometry: SCNCapsule(capRadius: 0.20, height: 0.42))
-        neck.geometry?.firstMaterial = material(color: outerFur)
-        neck.position = SCNVector3(0, 0.48, 0)
-        bodyNode.addChildNode(neck)
+        for side: Float in [-1, 1] {
+            let shoulder = SCNNode(geometry: SCNSphere(radius: 0.30))
+            shoulder.geometry?.firstMaterial = material(color: liftedFur)
+            shoulder.scale = SCNVector3(1.12, 1.08, 0.90)
+            shoulder.position = SCNVector3(0.31 * side, 0.28, 0)
+            bodyNode.addChildNode(shoulder)
+        }
 
-        headNode.geometry = SCNSphere(radius: 0.41)
-        headNode.geometry?.firstMaterial = material(color: outerFur)
-        headNode.scale = SCNVector3(1.0, 0.94, 0.96)
-        headNode.position = SCNVector3(0, 0.78, 0.015)
+        headNode.geometry = SCNSphere(radius: 0.35)
+        headNode.geometry?.firstMaterial = material(color: blackFur)
+        headNode.scale = SCNVector3(0.96, 1.06, 0.92)
+        headNode.position = SCNVector3(0, 0.69, 0.06)
         bodyNode.addChildNode(headNode)
 
-        let muzzle = SCNNode(geometry: SCNCapsule(capRadius: 0.105, height: 0.36))
-        muzzle.geometry?.firstMaterial = material(color: paleFur)
-        muzzle.eulerAngles.x = .pi / 2
-        muzzle.position = SCNVector3(0, -0.16, 0.38)
+        let crown = SCNNode(geometry: SCNSphere(radius: 0.25))
+        crown.geometry?.firstMaterial = material(color: liftedFur)
+        crown.scale = SCNVector3(0.84, 1.12, 0.82)
+        crown.position = SCNVector3(0, 0.25, -0.035)
+        headNode.addChildNode(crown)
+
+        let brow = SCNNode(geometry: SCNBox(width: 0.48, height: 0.12, length: 0.13, chamferRadius: 0.045))
+        brow.geometry?.firstMaterial = material(color: liftedFur)
+        brow.position = SCNVector3(0, 0.055, 0.33)
+        headNode.addChildNode(brow)
+
+        let muzzle = SCNNode(geometry: SCNSphere(radius: 0.225))
+        muzzle.geometry?.firstMaterial = material(color: bareSkin)
+        muzzle.scale = SCNVector3(1.18, 0.72, 0.72)
+        muzzle.position = SCNVector3(0, -0.13, 0.355)
         headNode.addChildNode(muzzle)
 
-        let nose = SCNNode(geometry: SCNSphere(radius: 0.052))
-        nose.geometry?.firstMaterial = material(color: UIColor(red: 0.055, green: 0.035, blue: 0.035, alpha: 1))
-        nose.position = SCNVector3(0, -0.16, 0.585)
+        let nose = SCNNode(geometry: SCNSphere(radius: 0.082))
+        nose.geometry?.firstMaterial = material(color: UIColor(white: 0.035, alpha: 1))
+        nose.scale = SCNVector3(1.35, 0.68, 0.62)
+        nose.position = SCNVector3(0, -0.055, 0.495)
         headNode.addChildNode(nose)
 
         for side: Float in [-1, 1] {
-            let eye = SCNNode(geometry: SCNSphere(radius: 0.034))
-            eye.geometry?.firstMaterial = material(
-                color: UIColor(red: 0.96, green: 0.50, blue: 0.10, alpha: 1),
-                emission: UIColor(red: 0.28, green: 0.07, blue: 0.01, alpha: 0.18)
-            )
-            eye.position = SCNVector3(0.145 * side, 0.015, 0.39)
+            let eye = SCNNode(geometry: SCNSphere(radius: 0.026))
+            eye.geometry?.firstMaterial = material(color: UIColor(red: 0.20, green: 0.13, blue: 0.07, alpha: 1))
+            eye.position = SCNVector3(0.125 * side, 0.035, 0.405)
             headNode.addChildNode(eye)
 
-            let cheek = SCNNode(geometry: SCNSphere(radius: 0.17))
-            cheek.geometry?.firstMaterial = material(color: paleFur)
-            cheek.scale = SCNVector3(0.82, 1.0, 0.32)
-            cheek.position = SCNVector3(0.22 * side, -0.13, 0.34)
-            headNode.addChildNode(cheek)
-
-            let ear = SCNNode(geometry: SCNCone(topRadius: 0.012, bottomRadius: 0.13, height: 0.38))
-            ear.geometry?.firstMaterial = material(color: outerFur)
-            ear.position = SCNVector3(0.24 * side, 0.38, -0.015)
-            ear.eulerAngles.z = side < 0 ? -0.20 : 0.20
+            let ear = SCNNode(geometry: SCNTorus(ringRadius: 0.060, pipeRadius: 0.022))
+            ear.geometry?.firstMaterial = material(color: bareSkin)
+            ear.eulerAngles.x = .pi / 2
+            ear.position = SCNVector3(0.33 * side, -0.005, 0.015)
             headNode.addChildNode(ear)
 
             let armPivot = side < 0 ? leftArmPivot : rightArmPivot
-            armPivot.position = SCNVector3(0.32 * side, 0.26, 0.015)
+            armPivot.position = SCNVector3(0.38 * side, 0.28, 0.015)
             bodyNode.addChildNode(armPivot)
 
-            let arm = SCNNode(geometry: SCNCapsule(capRadius: 0.09, height: 0.52))
-            arm.geometry?.firstMaterial = material(color: outerFur)
-            arm.position = SCNVector3(0.035 * side, -0.21, 0.075)
-            arm.eulerAngles.z = side < 0 ? 0.12 : -0.12
-            armPivot.addChildNode(arm)
+            let upperArm = SCNNode(geometry: SCNCapsule(capRadius: 0.165, height: 0.56))
+            upperArm.geometry?.firstMaterial = material(color: liftedFur)
+            upperArm.scale = SCNVector3(1.04, 1.0, 0.94)
+            upperArm.position = SCNVector3(0.045 * side, -0.20, 0.025)
+            upperArm.eulerAngles.z = side < 0 ? 0.13 : -0.13
+            armPivot.addChildNode(upperArm)
 
-            let paw = SCNNode(geometry: SCNSphere(radius: 0.115))
-            paw.geometry?.firstMaterial = material(color: outerFur)
+            let forearm = SCNNode(geometry: SCNCapsule(capRadius: 0.175, height: 0.60))
+            forearm.geometry?.firstMaterial = material(color: liftedFur)
+            forearm.scale = SCNVector3(1.08, 1.0, 0.96)
+            forearm.position = SCNVector3(0.075 * side, -0.57, 0.055)
+            forearm.eulerAngles.z = side < 0 ? -0.07 : 0.07
+            armPivot.addChildNode(forearm)
+
+            let paw = side < 0 ? leftHandNode : rightHandNode
+            paw.geometry = SCNSphere(radius: 0.175)
+            paw.geometry?.firstMaterial = material(color: bareSkin)
             paw.scale = SCNVector3(0.90, 1.08, 0.90)
-            paw.position = SCNVector3(0.065 * side, -0.46, 0.13)
+            paw.position = SCNVector3(0.055 * side, -0.88, 0.12)
             armPivot.addChildNode(paw)
 
             let legPivot = side < 0 ? leftLegPivot : rightLegPivot
-            legPivot.position = SCNVector3(0.18 * side, -0.42, -0.015)
+            legPivot.position = SCNVector3(0.19 * side, -0.39, -0.02)
             bodyNode.addChildNode(legPivot)
 
-            let leg = SCNNode(geometry: SCNCapsule(capRadius: 0.105, height: 0.48))
-            leg.geometry?.firstMaterial = material(color: outerFur)
-            leg.position = SCNVector3(0, -0.23, 0.015)
+            let leg = SCNNode(geometry: SCNCapsule(capRadius: 0.155, height: 0.42))
+            leg.geometry?.firstMaterial = material(color: blackFur)
+            leg.position = SCNVector3(0, -0.18, 0.015)
             legPivot.addChildNode(leg)
 
             let foot = side < 0 ? leftFootNode : rightFootNode
-            foot.geometry = SCNSphere(radius: 0.145)
-            foot.geometry?.firstMaterial = material(color: outerFur)
-            foot.scale = SCNVector3(1.12, 0.62, 1.32)
-            foot.position = SCNVector3(0.025 * side, -0.50, 0.10)
+            foot.geometry = SCNSphere(radius: 0.18)
+            foot.geometry?.firstMaterial = material(color: bareSkin)
+            foot.scale = SCNVector3(1.12, 0.52, 1.45)
+            foot.position = SCNVector3(0.02 * side, -0.45, 0.15)
             legPivot.addChildNode(foot)
         }
 
-        let chestFur = SCNNode(geometry: SCNSphere(radius: 0.28))
-        chestFur.geometry?.firstMaterial = material(color: paleFur)
-        chestFur.scale = SCNVector3(0.78, 1.18, 0.17)
-        chestFur.position = SCNVector3(0, 0.04, 0.31)
-        bodyNode.addChildNode(chestFur)
+        for side: Float in [-1, 1] {
+            let pectoral = SCNNode(geometry: SCNSphere(radius: 0.23))
+            pectoral.geometry?.firstMaterial = material(color: chestSkin)
+            pectoral.scale = SCNVector3(1.0, 0.72, 0.26)
+            pectoral.position = SCNVector3(0.17 * side, 0.15, 0.38)
+            bodyNode.addChildNode(pectoral)
+        }
+        for row in 0..<2 {
+            for side: Float in [-1, 1] {
+                let abdominal = SCNNode(geometry: SCNSphere(radius: 0.135))
+                abdominal.geometry?.firstMaterial = material(color: chestSkin)
+                abdominal.scale = SCNVector3(0.78, 0.58, 0.22)
+                abdominal.position = SCNVector3(0.105 * side, -0.08 - Float(row) * 0.16, 0.33)
+                bodyNode.addChildNode(abdominal)
+            }
+        }
 
-        let scarf = SCNNode(geometry: SCNTorus(ringRadius: 0.225, pipeRadius: 0.045))
-        scarf.geometry?.firstMaterial = material(color: UIColor(red: 0.47, green: 0.045, blue: 0.065, alpha: 1))
-        scarf.eulerAngles.x = .pi / 2
-        scarf.position = SCNVector3(0, 0.45, 0)
-        bodyNode.addChildNode(scarf)
-
-        let tail = SCNNode(geometry: SCNCapsule(capRadius: 0.105, height: 0.62))
-        tail.geometry?.firstMaterial = material(color: outerFur)
-        tail.position = SCNVector3(-0.31, -0.27, -0.22)
-        tail.eulerAngles.z = 0.72
-        tail.eulerAngles.x = -0.16
-        bodyNode.addChildNode(tail)
-
-        let tailTip = SCNNode(geometry: SCNSphere(radius: 0.115))
-        tailTip.geometry?.firstMaterial = material(color: paleFur)
-        tailTip.position = SCNVector3(0, 0.28, 0)
-        tail.addChildNode(tailTip)
     }
 
     private func configurePillarFigure() {
@@ -807,11 +968,14 @@ private final class PlayerFigureRig {
         let material = SCNMaterial()
         material.diffuse.contents = color
         material.emission.contents = emission
-        material.lightingModel = .physicallyBased
-        material.roughness.contents = 0.78
+        material.specular.contents = UIColor.black
+        material.lightingModel = .lambert
+        material.roughness.contents = 1.0
         material.metalness.contents = 0.0
+        material.fresnelExponent = 0
         return material
     }
+
 }
 
 private final class SCNOctahedronGeometry: SCNGeometry {

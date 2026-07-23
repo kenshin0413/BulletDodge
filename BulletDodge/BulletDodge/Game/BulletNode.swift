@@ -26,6 +26,7 @@ struct ShardBurstTemplate {
 
 struct ExplosionSpec {
     let position: CGPoint
+    let damagePosition: CGPoint
     let splashRadius: CGFloat
     let splashDamage: CGFloat
     let fragments: [FragmentSpec]
@@ -75,6 +76,7 @@ final class BulletNode: SKNode {
     private var facingDirection: CGVector
     private var radialDirection: CGVector
     private var pathOrigin: CGPoint?
+    private var previousGroundContactPosition: CGPoint?
 
     private init(
         kind: Kind,
@@ -107,9 +109,18 @@ final class BulletNode: SKNode {
         let trailSize = kind == .thornBall
             ? CGSize(width: radius * 0.56, height: radius * 1.14)
             : CGSize(width: radius * 0.18, height: radius * 0.70)
+        // Size the ground shadow from the visible art rather than the larger
+        // collision/animation radius.  A thin oval reads as a cast shadow while
+        // leaving enough space below the projectile to show that it is airborne.
         let shadowSize = kind == .thornBall
-            ? CGSize(width: radius * 0.86, height: radius * 0.43)
-            : CGSize(width: radius * 0.66, height: radius * 0.34)
+            ? CGSize(
+                width: GameConfig.thornBallVisualDiameter * 0.76,
+                height: GameConfig.thornBallVisualDiameter * 0.30
+            )
+            : CGSize(
+                width: GameConfig.thornShardVisualLength * 0.74,
+                height: GameConfig.thornShardVisualWidth * 0.27
+            )
 
         shadowNode = SKShapeNode(ellipseOf: shadowSize)
         trailNode = SKShapeNode(rectOf: trailSize, cornerRadius: trailSize.width * 0.5)
@@ -135,8 +146,9 @@ final class BulletNode: SKNode {
 
         super.init()
 
-        shadowNode.fillColor = UIColor.black.withAlphaComponent(kind == .thornBall ? 0.16 : 0.13)
+        shadowNode.fillColor = UIColor.black.withAlphaComponent(kind == .thornBall ? 0.28 : 0.23)
         shadowNode.strokeColor = .clear
+        shadowNode.glowWidth = kind == .thornBall ? 2.2 : 1.4
         addChild(shadowNode)
 
         trailNode.fillColor = UIColor(red: 0.48, green: 0.96, blue: 1.0, alpha: kind == .thornBall ? 0.14 : 0.18)
@@ -190,8 +202,13 @@ final class BulletNode: SKNode {
         )
     }
 
+    static func prewarmVisualResources() {
+        SKTexture.preload([ballTexture, shardTexture, burstTexture]) { }
+    }
+
     @discardableResult
     func update(deltaTime: TimeInterval) -> BulletOutcome {
+        let groundContactPositionBeforeMovement = groundContactPosition
         let movementDeltaTime: TimeInterval
         if case .thornBall = kind, let fuseDuration {
             // Stop exactly at the fuse endpoint instead of overshooting by up to one frame.
@@ -215,6 +232,7 @@ final class BulletNode: SKNode {
             }
             updateShardFacingDirection()
             updateVisuals(deltaTime: deltaTime)
+            previousGroundContactPosition = groundContactPositionBeforeMovement
 
             if lifetime >= (keyframes.last?.time ?? 0) {
                 return .expired
@@ -230,6 +248,7 @@ final class BulletNode: SKNode {
         position = CGPoint(x: position.x + delta.dx, y: position.y + delta.dy)
         traveledDistance += delta.length
         updateVisuals(deltaTime: movementDeltaTime)
+        previousGroundContactPosition = groundContactPositionBeforeMovement
 
         if case .thornBall = kind, let fuseDuration, lifetime >= fuseDuration {
             return .explode(makeExplosionSpec())
@@ -276,91 +295,62 @@ final class BulletNode: SKNode {
         return makeExplosionSpec()
     }
 
-    func intersectsPlayer(
-        at playerPosition: CGPoint,
-        containsPlayerPoint: (CGPoint) -> Bool
-    ) -> Bool {
-        let maximumProjectileExtent = kind == .thornBall
-            ? GameConfig.thornBallVisualDiameter * 0.5
-            : max(GameConfig.thornShardVisualLength, GameConfig.thornShardVisualWidth) * 0.5
-        let broadPhaseHalfWidth = GameConfig.playerHitMaskMaxSize.width * 0.5 + maximumProjectileExtent
-        let broadPhaseHalfHeight = GameConfig.playerHitMaskMaxSize.height * 0.5 + maximumProjectileExtent
-        guard abs(position.x - playerPosition.x) <= broadPhaseHalfWidth,
-              abs(position.y - playerPosition.y) <= broadPhaseHalfHeight else {
-            return false
-        }
-
-        let samplePoints: [CGPoint]
+    func intersectsPlayer(at playerPosition: CGPoint) -> Bool {
+        // Character and projectile art may be rendered above the arena plane,
+        // but Brawl-style damage is resolved entirely in 2D on that plane.
+        // The projectile shadow marks its ground position; model depth and
+        // front/back rendering order must never affect contact.
+        let combinedRadius = GameConfig.playerHitRadius + contactRadius
+        let distanceSquared: CGFloat
         switch kind {
         case .thornBall:
-            samplePoints = Self.circleSamplePoints(
-                center: position,
-                radius: GameConfig.thornBallVisualDiameter * 0.5
-            )
+            let deltaX = groundContactPosition.x - playerPosition.x
+            let deltaY = groundContactPosition.y - playerPosition.y
+            distanceSquared = deltaX * deltaX + deltaY * deltaY
         case .thornShard:
-            samplePoints = Self.triangleSamplePoints(
-                center: position,
-                direction: facingDirection.normalized,
-                length: GameConfig.thornShardVisualLength,
-                width: GameConfig.thornShardVisualWidth
+            // Test the complete path covered during this rendered frame.
+            // A fast thorn must not tunnel through the 2D player circle when
+            // frame duration varies or a frame is dropped.
+            distanceSquared = Self.squaredDistance(
+                from: playerPosition,
+                toSegmentFrom: previousGroundContactPosition ?? groundContactPosition,
+                through: groundContactPosition
             )
         }
-
-        guard !samplePoints.isEmpty else { return false }
-        let requiredCount = Int(ceil(
-            CGFloat(samplePoints.count) * GameConfig.projectileRequiredPlayerOverlap
-        ))
-        var coveredCount = 0
-        for point in samplePoints where containsPlayerPoint(point) {
-            coveredCount += 1
-            if coveredCount >= requiredCount {
-                return true
-            }
-        }
-        return false
+        return distanceSquared <= combinedRadius * combinedRadius
     }
 
-    private static func circleSamplePoints(center: CGPoint, radius: CGFloat) -> [CGPoint] {
-        let gridSize = 17
-        var result: [CGPoint] = []
-        result.reserveCapacity(gridSize * gridSize)
-        for row in 0..<gridSize {
-            let localY = ((CGFloat(row) + 0.5) / CGFloat(gridSize) * 2 - 1) * radius
-            for column in 0..<gridSize {
-                let localX = ((CGFloat(column) + 0.5) / CGFloat(gridSize) * 2 - 1) * radius
-                guard localX * localX + localY * localY <= radius * radius else { continue }
-                result.append(CGPoint(x: center.x + localX, y: center.y + localY))
-            }
-        }
-        return result
+    private var groundContactPosition: CGPoint {
+        CGPoint(
+            x: position.x + shadowNode.position.x,
+            y: position.y + shadowNode.position.y
+        )
     }
 
-    private static func triangleSamplePoints(
-        center: CGPoint,
-        direction: CGVector,
-        length: CGFloat,
-        width: CGFloat
-    ) -> [CGPoint] {
-        let gridSize = 17
-        let halfLength = length * 0.5
-        let halfWidth = width * 0.5
-        let normal = CGVector(dx: -direction.dy, dy: direction.dx)
-        var result: [CGPoint] = []
-        result.reserveCapacity(gridSize * gridSize / 2)
-
-        for row in 0..<gridSize {
-            let lateral = ((CGFloat(row) + 0.5) / CGFloat(gridSize) * 2 - 1) * halfWidth
-            for column in 0..<gridSize {
-                let axial = ((CGFloat(column) + 0.5) / CGFloat(gridSize) * 2 - 1) * halfLength
-                let allowedHalfWidth = halfWidth * (halfLength - axial) / max(length, 0.001)
-                guard abs(lateral) <= allowedHalfWidth else { continue }
-                result.append(CGPoint(
-                    x: center.x + direction.dx * axial + normal.dx * lateral,
-                    y: center.y + direction.dy * axial + normal.dy * lateral
-                ))
-            }
+    private static func squaredDistance(
+        from point: CGPoint,
+        toSegmentFrom start: CGPoint,
+        through end: CGPoint
+    ) -> CGFloat {
+        let segmentX = end.x - start.x
+        let segmentY = end.y - start.y
+        let lengthSquared = segmentX * segmentX + segmentY * segmentY
+        guard lengthSquared > 0.000_001 else {
+            let deltaX = point.x - end.x
+            let deltaY = point.y - end.y
+            return deltaX * deltaX + deltaY * deltaY
         }
-        return result
+
+        let projection = (
+            (point.x - start.x) * segmentX
+                + (point.y - start.y) * segmentY
+        ) / lengthSquared
+        let clampedProjection = min(1, max(0, projection))
+        let closestX = start.x + segmentX * clampedProjection
+        let closestY = start.y + segmentY * clampedProjection
+        let deltaX = point.x - closestX
+        let deltaY = point.y - closestY
+        return deltaX * deltaX + deltaY * deltaY
     }
 
     private func makeExplosionSpec() -> ExplosionSpec {
@@ -375,7 +365,10 @@ final class BulletNode: SKNode {
 
         return ExplosionSpec(
             position: position,
-            splashRadius: GameConfig.explosionRadius,
+            damagePosition: groundContactPosition,
+            // The parent projectile keeps one fixed 2D contact circle through
+            // flight and landing. The burst artwork does not enlarge damage.
+            splashRadius: contactRadius,
             splashDamage: GameConfig.explosionDamage,
             fragments: fragments
         )
@@ -404,7 +397,12 @@ final class BulletNode: SKNode {
             spriteNode.alpha = 1.0
             orbitRoot.zRotation -= CGFloat(deltaTime) * 7.2
             orbitRoot.alpha = 0.72 + sin(CGFloat(lifetime) * 18) * 0.12
-            shadowNode.position = CGPoint(x: 1.5, y: -radius * 0.40)
+            // Keep the shadow visibly below the art. Previously it sat underneath
+            // the transparent-padded sprite and was almost completely hidden.
+            shadowNode.position = CGPoint(
+                x: GameConfig.thornBallVisualDiameter * 0.05,
+                y: -GameConfig.thornBallVisualDiameter * 0.66
+            )
             shadowNode.setScale(1.0)
             shadowNode.alpha = 1.0
         case .thornShard:
@@ -413,7 +411,10 @@ final class BulletNode: SKNode {
             zRotation = 0
             visualRoot.zRotation = heading
             visualRoot.setScale(0.96 + min(CGFloat(lifetime) * 0.75, 0.10))
-            shadowNode.position = CGPoint(x: 1.5, y: -radius * 0.30)
+            shadowNode.position = CGPoint(
+                x: GameConfig.thornShardVisualLength * 0.05,
+                y: -GameConfig.thornShardVisualWidth * 0.78
+            )
             let finalTime = keyframes?.last?.time ?? GameConfig.thornShardFlightDuration
             // The reference thorn stays fully readable through most of its flight
             // and only becomes translucent during the final tenth of a second.
