@@ -56,6 +56,7 @@ final class GameScene: SKScene {
     private let ammoLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
     private let backgroundContainer = SKNode()
     private let explosionContainer = SKNode()
+    private let hitFeedback = UIImpactFeedbackGenerator(style: .light)
 
     private var bullets: [BulletNode] = []
     private var lastUpdateTime: TimeInterval = 0
@@ -66,6 +67,8 @@ final class GameScene: SKScene {
     private var screenShakeTimeRemaining: TimeInterval = 0
     private var joystickTouch: UITouch?
     private var enemyReferencePoint: CGPoint = .zero
+    private var queuedEnemyTargetPoint: CGPoint?
+    private var isWallPressureRecoveryActive = false
     private var autoWallPhase: AutoWallPhase = .bottomCenter
     private var autoWallHoldTimeRemaining: TimeInterval = 0
     private var autoWallLogTimer: TimeInterval = 0
@@ -150,15 +153,23 @@ final class GameScene: SKScene {
         if autoWallTest {
             updateAutoWallRoute(deltaTime: deltaTime)
         }
+        updateWallPressureRecoveryState()
         if GameConfig.enemyMovementEnabled && !autoWallTest && !autoAttackTest {
             updateEnemyReferencePoint(deltaTime: deltaTime)
             let enemyAnchor = preferredEnemyAnchorPosition()
             enemy.updateMovement(
                 deltaTime: deltaTime,
                 desiredAnchor: enemyAnchor,
-                mapRect: playableRect
+                playerPosition: player.position,
+                mapRect: playableRect,
+                visibleRect: currentVisibleRect
             )
-            constrainEnemyToUpperLane()
+            enemy.position = constrainedArenaPosition(
+                enemy.position,
+                collisionRadius: GameConfig.enemyCollisionRadius
+            )
+        } else {
+            enemy.updateStationaryPose(deltaTime: deltaTime)
         }
         enemy.updateReload(deltaTime: deltaTime)
 
@@ -166,10 +177,16 @@ final class GameScene: SKScene {
             switch enemy.updateAttack(deltaTime: deltaTime) {
             case .none:
                 break
-            case .beganThrow:
+            case .beganThrow(let shotContext):
+                let targetPoint = makeThrowTargetPoint(for: shotContext)
+                queuedEnemyTargetPoint = targetPoint
+                enemy.faceAttack(toward: targetPoint)
                 scheduleAutoAttackCaptures()
-            case .releaseProjectile:
-                spawnBullet()
+            case .releaseProjectile(let shotContext):
+                let targetPoint = queuedEnemyTargetPoint
+                    ?? makeThrowTargetPoint(for: shotContext)
+                queuedEnemyTargetPoint = nil
+                spawnBullet(toward: targetPoint)
             }
         }
 
@@ -392,6 +409,8 @@ final class GameScene: SKScene {
         joystick.isHidden = autoWallCapture
 
         resetState()
+        BulletNode.prewarmVisualResources()
+        hitFeedback.prepare()
         layoutOverlayNodes()
         updateCameraScale()
         updateCameraPosition()
@@ -415,10 +434,13 @@ final class GameScene: SKScene {
         capturedAutoWallPhases.removeAll()
         autoAttackCaptureSchedule.removeAll()
         currentAttackCaptureID = 0
+        queuedEnemyTargetPoint = nil
+        isWallPressureRecoveryActive = false
         joystick.removeAllActions()
 
         player.reset()
         enemy.reset()
+        enemy.setWallRecoveryActive(false)
         player.alpha = GameConfig.debugHideActorsEnabled ? 0 : 1
         enemy.alpha = GameConfig.debugHideActorsEnabled ? 0 : 1
 
@@ -432,6 +454,18 @@ final class GameScene: SKScene {
                 x: playableRect.midX,
                 y: playableRect.midY - GameConfig.tileSize * 2.6
             )
+        } else if GameConfig.debugCornerAttackTestEnabled {
+            let margin = GameConfig.playerCollisionRadius
+            switch GameConfig.debugCornerStartPosition {
+            case "top-left":
+                player.position = CGPoint(x: playableRect.minX + margin, y: playableRect.maxY - margin)
+            case "top-right":
+                player.position = CGPoint(x: playableRect.maxX - margin, y: playableRect.maxY - margin)
+            case "bottom-right":
+                player.position = CGPoint(x: playableRect.maxX - margin, y: playableRect.minY + margin)
+            default:
+                player.position = CGPoint(x: playableRect.minX + margin, y: playableRect.minY + margin)
+            }
         } else {
             player.position = .zero
         }
@@ -1104,10 +1138,7 @@ final class GameScene: SKScene {
             if case .active = outcome,
                !autoAttackTest,
                let contactExplosion = bullet.contactExplosionSpec(),
-               bullet.intersectsPlayer(
-                   at: player.position,
-                   containsPlayerPoint: player.containsHitPoint
-               ) {
+               bullet.intersectsPlayer(at: player.hitCenterWorld) {
                 let fragments = handleExplosion(contactExplosion, from: bullet)
                 spawnedFragments.append(contentsOf: fragments)
                 continue
@@ -1135,7 +1166,8 @@ final class GameScene: SKScene {
     }
 
     private func detectHit(for bullet: BulletNode) -> Bool {
-        if autoAttackTest {
+        if autoAttackTest || (GameConfig.debugCornerAttackTestEnabled
+            && !GameConfig.debugCornerDamageEnabled) {
             return false
         }
         if bullet.isTimedParent {
@@ -1145,16 +1177,16 @@ final class GameScene: SKScene {
             return false
         }
         guard !bullet.hasDealtDamage else { return false }
-        guard bullet.intersectsPlayer(
-            at: player.position,
-            containsPlayerPoint: player.containsHitPoint
-        ) else { return false }
+        guard bullet.intersectsPlayer(at: player.hitCenterWorld) else { return false }
 
         bullet.registerHit()
         bullet.removeFromParent()
         hitCount += 1
+        if GameConfig.debugProjectileLoggingEnabled {
+            print("PLAYER HIT projectile count=\(hitCount)")
+        }
         screenShakeTimeRemaining = GameConfig.shakeDuration
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        playHitFeedback()
 
         let isDead = player.takeDamage(bullet.damage)
         if isDead {
@@ -1164,15 +1196,13 @@ final class GameScene: SKScene {
         return true
     }
 
-    private func spawnBullet() {
-        let targetPoint = makeThrowTargetPoint()
+    private func spawnBullet(toward targetPoint: CGPoint) {
         let direction = CGVector(
             dx: targetPoint.x - enemy.position.x,
             dy: targetPoint.y - enemy.position.y
         ).normalized
         let rightHandOffset = CGVector(dx: direction.dy, dy: -direction.dx)
-        let bullet = BulletNode.thornBall(direction: direction)
-        bullet.position = CGPoint(
+        let spawnPoint = CGPoint(
             x: enemy.position.x
                 + direction.dx * (GameConfig.enemyVisualRadius + GameConfig.thornBallSpawnInset)
                 + rightHandOffset.dx * (GameConfig.tileSize * 0.22),
@@ -1180,6 +1210,8 @@ final class GameScene: SKScene {
                 + direction.dy * (GameConfig.enemyVisualRadius + GameConfig.thornBallSpawnInset)
                 + rightHandOffset.dy * (GameConfig.tileSize * 0.22)
         )
+        let bullet = BulletNode.thornBall(direction: direction)
+        bullet.position = spawnPoint
         bullet.zPosition = 25
         bullets.append(bullet)
         addChild(bullet)
@@ -1274,6 +1306,17 @@ final class GameScene: SKScene {
         return GameConfig.cameraVisibleHeight / size.height
     }
 
+    private var currentVisibleRect: CGRect {
+        let visibleWidth = size.width * currentCameraScaleX
+        let visibleHeight = size.height * currentCameraScaleY
+        return CGRect(
+            x: gameCamera.position.x - visibleWidth / 2,
+            y: gameCamera.position.y - visibleHeight / 2,
+            width: visibleWidth,
+            height: visibleHeight
+        )
+    }
+
     private func preferredEnemyAnchorPosition() -> CGPoint {
         let visibleWidth = size.width * currentCameraScaleX
         let visibleHeight = size.height * currentCameraScaleY
@@ -1287,30 +1330,92 @@ final class GameScene: SKScene {
     private func updateEnemyReferencePoint(deltaTime: TimeInterval) {
         let horizontalBlend = min(1, CGFloat(deltaTime) * GameConfig.enemyReferenceFollowRate)
         let verticalBlend = min(1, CGFloat(deltaTime) * (GameConfig.enemyReferenceFollowRate * 0.55))
+        let practiceCenter = CGPoint(
+            x: playableRect.midX,
+            y: min(max(0, playableRect.minY), playableRect.maxY)
+        )
+        let horizontalTarget = practiceCenter.x
+            + (player.position.x - practiceCenter.x) * 0.28
+        let verticalInfluence: CGFloat = player.position.y < practiceCenter.y ? 0.05 : 0.20
+        let verticalTarget = practiceCenter.y
+            + (player.position.y - practiceCenter.y) * verticalInfluence
         enemyReferencePoint = CGPoint(
-            x: enemyReferencePoint.x + (player.position.x - enemyReferencePoint.x) * horizontalBlend,
-            y: enemyReferencePoint.y + (player.position.y - enemyReferencePoint.y) * verticalBlend
+            x: enemyReferencePoint.x + (horizontalTarget - enemyReferencePoint.x) * horizontalBlend,
+            y: enemyReferencePoint.y + (verticalTarget - enemyReferencePoint.y) * verticalBlend
         )
     }
 
-    private func makeThrowTargetPoint() -> CGPoint {
+    private func updateWallPressureRecoveryState() {
+        guard !autoWallTest, !autoAttackTest else {
+            if isWallPressureRecoveryActive {
+                isWallPressureRecoveryActive = false
+                enemy.setWallRecoveryActive(false)
+            }
+            return
+        }
+
+        let frontWallY = playableRect.minY + GameConfig.playerCollisionRadius
+        let distanceFromFrontWall = max(0, player.position.y - frontWallY)
+        if isWallPressureRecoveryActive {
+            if distanceFromFrontWall >= GameConfig.enemyWallRecoveryReleaseDistance {
+                isWallPressureRecoveryActive = false
+                enemy.setWallRecoveryActive(false)
+            }
+        } else if distanceFromFrontWall <= GameConfig.enemyWallRecoveryTriggerDistance {
+            isWallPressureRecoveryActive = true
+            enemy.setWallRecoveryActive(true)
+        }
+    }
+
+    private func makeThrowTargetPoint(for shotContext: EnemyNode.ShotContext) -> CGPoint {
         var refinedPoint = CGPoint(
             x: player.position.x + player.velocity.dx * GameConfig.thornBallTargetLeadFactor,
             y: player.position.y + player.velocity.dy * GameConfig.thornBallTargetLeadFactor
         )
+
+        let towardPlayer = CGVector(
+            dx: refinedPoint.x - enemy.position.x,
+            dy: refinedPoint.y - enemy.position.y
+        ).normalized
+        let perpendicular = CGVector(dx: towardPlayer.dy, dy: -towardPlayer.dx)
+        let side: CGFloat = Bool.random() ? 1 : -1
+        let lateralOffset: CGFloat
+        switch shotContext.aimStyle {
+        case .direct:
+            lateralOffset = 0
+        case .smallOffset:
+            lateralOffset = CGFloat.random(in: GameConfig.enemySmallAimOffsetRange) * side
+        case .largeOffset:
+            lateralOffset = CGFloat.random(in: GameConfig.enemyLargeAimOffsetRange) * side
+        }
+        refinedPoint.x += perpendicular.dx * lateralOffset
+        refinedPoint.y += perpendicular.dy * lateralOffset
+
         if GameConfig.debugProjectileTargetOffsetX != 0 || GameConfig.debugProjectileTargetOffsetY != 0 {
             refinedPoint.x += GameConfig.debugProjectileTargetOffsetX
             refinedPoint.y += GameConfig.debugProjectileTargetOffsetY
         }
-        return refinedPoint.clamped(in: playableRect.insetBy(dx: 54, dy: 54))
+        return constrainedArenaPosition(
+            refinedPoint,
+            collisionRadius: GameConfig.playerCollisionRadius
+        )
     }
 
     private func handleExplosion(_ explosion: ExplosionSpec, from bullet: BulletNode) -> [BulletNode] {
         bullet.removeFromParent()
-        applySplashDamage(at: explosion.position, radius: explosion.splashRadius, damage: explosion.splashDamage)
+        applySplashDamage(
+            at: explosion.damagePosition,
+            radius: explosion.splashRadius,
+            damage: explosion.splashDamage
+        )
         spawnExplosionEffect(at: explosion.position)
         if GameConfig.debugProjectileLoggingEnabled {
-            print("EXPLODE pos=(\(Int(explosion.position.x)),\(Int(explosion.position.y))) count=\(explosion.fragments.count)")
+            print(
+                "EXPLODE pos=(\(Int(explosion.position.x)),\(Int(explosion.position.y))) "
+                + "damagePos=(\(Int(explosion.damagePosition.x)),\(Int(explosion.damagePosition.y))) "
+                + "player=(\(Int(player.position.x)),\(Int(player.position.y))) "
+                + "count=\(explosion.fragments.count)"
+            )
         }
 
         var fragments: [BulletNode] = []
@@ -1340,16 +1445,23 @@ final class GameScene: SKScene {
     }
 
     private func applySplashDamage(at position: CGPoint, radius: CGFloat, damage: CGFloat) {
-        if autoAttackTest {
+        if autoAttackTest || (GameConfig.debugCornerAttackTestEnabled
+            && !GameConfig.debugCornerDamageEnabled) {
             return
         }
-        let deltaX = (player.position.x - position.x) / (GameConfig.playerHitRadiusX + radius)
-        let deltaY = (player.position.y - position.y) / (GameConfig.playerHitRadiusY + radius)
-        guard deltaX * deltaX + deltaY * deltaY <= 1 else { return }
+        let hitCenter = player.hitCenterWorld
+        let deltaX = hitCenter.x - position.x
+        let deltaY = hitCenter.y - position.y
+        let combinedRadius = GameConfig.playerHitRadius + radius
+        guard deltaX * deltaX + deltaY * deltaY
+            <= combinedRadius * combinedRadius else { return }
 
         hitCount += 1
+        if GameConfig.debugProjectileLoggingEnabled {
+            print("PLAYER HIT explosion count=\(hitCount)")
+        }
         screenShakeTimeRemaining = GameConfig.shakeDuration
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        playHitFeedback()
         let isDead = player.takeDamage(damage)
         if isDead {
             endGame()
@@ -1377,6 +1489,11 @@ final class GameScene: SKScene {
             .fadeOut(withDuration: 0.052)
         ])
         burst.run(.sequence([appear, disappear, .removeFromParent()]))
+    }
+
+    private func playHitFeedback() {
+        hitFeedback.impactOccurred(intensity: 0.72)
+        hitFeedback.prepare()
     }
 
     private func petalBurstPath(radius: CGFloat, petals: Int) -> CGPath {

@@ -2,10 +2,28 @@ import SceneKit
 import SpriteKit
 
 final class EnemyNode: SKNode {
+    private enum MovementMode {
+        case orbiting
+        case approaching
+        case retreating
+    }
+
+    enum AimStyle: CaseIterable {
+        case direct
+        case smallOffset
+        case largeOffset
+    }
+
+    struct ShotContext {
+        let burstIndex: Int
+        let burstCount: Int
+        let aimStyle: AimStyle
+    }
+
     enum AttackUpdateResult {
         case none
-        case beganThrow
-        case releaseProjectile
+        case beganThrow(ShotContext)
+        case releaseProjectile(ShotContext)
     }
 
     private let shadowNode = SKShapeNode(
@@ -14,6 +32,7 @@ final class EnemyNode: SKNode {
             height: GameConfig.tileSize * 0.32
         )
     )
+    private let groundIndicatorNode = SKNode()
     private let modelNode = SK3DNode(viewportSize: GameConfig.playerModelViewportSize)
     private let rig = EnemyFigureRig()
 
@@ -25,18 +44,35 @@ final class EnemyNode: SKNode {
     private var nextFireTimer: TimeInterval = 0
     private var throwReleaseTimer: TimeInterval = 0
     private var isThrowQueued = false
+    private var burstShotsRemaining = 0
+    private var activeBurstSize = 0
+    private var activeBurstShotIndex = 0
+    private var activeAimStyles: [AimStyle] = []
+    private var queuedShotContext: ShotContext?
     private var lateralBias: CGFloat = 0
     private var verticalBias: CGFloat = 0
+    private var targetLateralBias: CGFloat = 0
+    private var targetVerticalBias: CGFloat = 0
+    private var movementVelocity: CGVector = .zero
+    private var movementMode: MovementMode = .orbiting
+    private var currentPlayerDistance: CGFloat = .greatestFiniteMagnitude
+    private var isWallRecoveryActive = false
+    private var isArenaEdgePressureActive = false
+    private var hasReachedWallRecoveryPosition = false
     private var bobTimer: TimeInterval = 0
     private var lastDelta: CGVector = .zero
     private var facingAngle: CGFloat = 0
+    private var attackFacingLockTimer: TimeInterval = 0
 
     override init() {
         super.init()
 
+        configureGroundIndicator()
+
         shadowNode.position = CGPoint(x: 0, y: -24)
         shadowNode.fillColor = UIColor.black.withAlphaComponent(0.18)
         shadowNode.strokeColor = .clear
+        shadowNode.zPosition = -1
 
         modelNode.scnScene = rig.scene
         modelNode.pointOfView = rig.cameraNode
@@ -45,6 +81,7 @@ final class EnemyNode: SKNode {
         modelNode.yScale = displayScale * GameConfig.enemyModelHeightScale
         modelNode.position = CGPoint(x: 0, y: -5)
 
+        addChild(groundIndicatorNode)
         addChild(shadowNode)
         addChild(modelNode)
 
@@ -53,6 +90,28 @@ final class EnemyNode: SKNode {
 
     required init?(coder aDecoder: NSCoder) {
         nil
+    }
+
+    private func configureGroundIndicator() {
+        let size = GameConfig.playerGroundIndicatorSize
+
+        let outer = SKShapeNode(ellipseOf: size)
+        outer.fillColor = UIColor(red: 0.12, green: 0.055, blue: 0.24, alpha: 0.34)
+        outer.strokeColor = UIColor(red: 0.67, green: 0.34, blue: 1.00, alpha: 0.94)
+        outer.lineWidth = 2.4
+        outer.glowWidth = 1.2
+
+        let inner = SKShapeNode(
+            ellipseOf: CGSize(width: size.width * 0.72, height: size.height * 0.68)
+        )
+        inner.fillColor = .clear
+        inner.strokeColor = UIColor(red: 0.96, green: 0.76, blue: 0.30, alpha: 0.78)
+        inner.lineWidth = 1.35
+
+        groundIndicatorNode.position = CGPoint(x: 0, y: -24)
+        groundIndicatorNode.zPosition = -2
+        groundIndicatorNode.addChild(outer)
+        groundIndicatorNode.addChild(inner)
     }
 
     func reset() {
@@ -64,45 +123,245 @@ final class EnemyNode: SKNode {
             : TimeInterval.random(in: GameConfig.enemyInitialAttackDelayRange)
         throwReleaseTimer = 0
         isThrowQueued = false
+        burstShotsRemaining = 0
+        activeBurstSize = 0
+        activeBurstShotIndex = 0
+        activeAimStyles.removeAll(keepingCapacity: true)
+        queuedShotContext = nil
         bobTimer = 0
+        lateralBias = 0
+        verticalBias = 0
+        targetLateralBias = 0
+        targetVerticalBias = 0
+        movementVelocity = .zero
+        movementMode = .orbiting
+        currentPlayerDistance = .greatestFiniteMagnitude
+        isWallRecoveryActive = false
+        isArenaEdgePressureActive = false
+        hasReachedWallRecoveryPosition = false
         lastDelta = .zero
         facingAngle = 0
+        attackFacingLockTimer = 0
         rig.resetPose()
         updateDirectionalHeight()
         chooseNewBias()
     }
 
-    func updateMovement(deltaTime: TimeInterval, desiredAnchor: CGPoint, mapRect: CGRect) {
+    func updateMovement(
+        deltaTime: TimeInterval,
+        desiredAnchor: CGPoint,
+        playerPosition: CGPoint,
+        mapRect: CGRect,
+        visibleRect: CGRect
+    ) {
         decisionTimer += deltaTime
         bobTimer += deltaTime
+        attackFacingLockTimer = max(0, attackFacingLockTimer - deltaTime)
         if decisionTimer >= decisionDuration {
             chooseBias()
         }
 
+        let biasBlend = min(1, CGFloat(deltaTime) * GameConfig.enemyBiasSmoothingRate)
+        lateralBias += (targetLateralBias - lateralBias) * biasBlend
+        verticalBias += (targetVerticalBias - verticalBias) * biasBlend
+
         let bobOffset = sin(bobTimer * GameConfig.enemyBobSpeed) * GameConfig.enemyBobAmplitude
-        let targetPoint = CGPoint(
+        var targetPoint = CGPoint(
             x: desiredAnchor.x + lateralBias,
             y: desiredAnchor.y + verticalBias + bobOffset
         )
+
+        let fromPlayer = CGVector(
+            dx: position.x - playerPosition.x,
+            dy: position.y - playerPosition.y
+        )
+        currentPlayerDistance = fromPlayer.length
+        if movementMode == .retreating,
+           currentPlayerDistance >= GameConfig.enemyRetreatCompletionDistance {
+            finishRetreat()
+        }
+
+        switch movementMode {
+        case .orbiting:
+            break
+        case .approaching:
+            let approachSideOffset = max(
+                -GameConfig.tileSize * 0.8,
+                min(GameConfig.tileSize * 0.8, lateralBias * 0.18)
+            )
+            targetPoint = CGPoint(
+                x: playerPosition.x + approachSideOffset,
+                y: playerPosition.y + GameConfig.enemyApproachDistance
+            )
+        case .retreating:
+            let retreatDirection = fromPlayer.length > 0
+                ? fromPlayer.normalized
+                : CGVector(dx: 0, dy: 1)
+            targetPoint = CGPoint(
+                x: playerPosition.x + retreatDirection.dx * GameConfig.enemyRetreatTargetDistance,
+                y: playerPosition.y + retreatDirection.dy * GameConfig.enemyRetreatTargetDistance
+            )
+        }
+
+        let targetFromPlayer = CGVector(
+            dx: targetPoint.x - playerPosition.x,
+            dy: targetPoint.y - playerPosition.y
+        )
+        if targetFromPlayer.length < GameConfig.enemyMinimumPlayerDistance {
+            let separationDirection = targetFromPlayer.length > 0
+                ? targetFromPlayer.normalized
+                : CGVector(dx: 0, dy: 1)
+            targetPoint = CGPoint(
+                x: playerPosition.x + separationDirection.dx * GameConfig.enemyMinimumPlayerDistance,
+                y: playerPosition.y + separationDirection.dy * GameConfig.enemyMinimumPlayerDistance
+            )
+        }
+
+        let mapSafeRect = mapRect.insetBy(
+            dx: GameConfig.enemyCollisionRadius,
+            dy: GameConfig.enemyCollisionRadius
+        )
+        let visibleSafeRect = visibleRect
+            .insetBy(dx: GameConfig.enemyScreenEdgeInset, dy: GameConfig.enemyScreenEdgeInset)
+            .intersection(mapSafeRect)
+        let edgeTriggerDistance = GameConfig.enemyWallRecoveryTriggerDistance
+        isArenaEdgePressureActive = playerPosition.x - mapSafeRect.minX <= edgeTriggerDistance
+            || mapSafeRect.maxX - playerPosition.x <= edgeTriggerDistance
+            || playerPosition.y - mapSafeRect.minY <= edgeTriggerDistance
+            || mapSafeRect.maxY - playerPosition.y <= edgeTriggerDistance
+        let isOutsideScreen = !visibleSafeRect.isNull
+            && !visibleSafeRect.isEmpty
+            && !visibleSafeRect.contains(position)
+        if isWallRecoveryActive || isArenaEdgePressureActive {
+            // At any arena edge, choose a valid point toward the arena
+            // interior. Clamping an outward target to the map boundary made
+            // the enemy walk against an invisible wall forever at the top.
+            let towardArenaInterior = CGVector(
+                dx: mapSafeRect.midX - playerPosition.x,
+                dy: mapSafeRect.midY - playerPosition.y
+            ).normalized
+            targetPoint = CGPoint(
+                x: playerPosition.x
+                    + towardArenaInterior.dx * GameConfig.enemyThornAttackPositionDistance,
+                y: playerPosition.y
+                    + towardArenaInterior.dy * GameConfig.enemyThornAttackPositionDistance
+            ).clamped(in: mapSafeRect)
+            if isWallRecoveryActive {
+                let recoveryDistance = CGPoint.distance(from: position, to: targetPoint)
+                if !hasReachedWallRecoveryPosition,
+                   recoveryDistance <= GameConfig.enemyWallRecoveryArrivalDistance {
+                    hasReachedWallRecoveryPosition = true
+                    nextFireTimer = max(
+                        nextFireTimer,
+                        GameConfig.enemyWallRecoveryArrivalAttackDelay
+                    )
+                }
+            }
+        } else if isOutsideScreen {
+            let edgePoint = position.clamped(in: visibleSafeRect)
+            targetPoint = CGPoint(
+                x: edgePoint.x + (visibleSafeRect.midX - edgePoint.x) * 0.18,
+                y: edgePoint.y + (visibleSafeRect.midY - edgePoint.y) * 0.18
+            )
+        }
+
+        // If the player moved farther away than the fixed parent flight plus
+        // its curved thorn can cover, close the gap at normal player speed.
+        // Projectile range and fuse remain unchanged.
+        if !isArenaEdgePressureActive,
+           currentPlayerDistance > GameConfig.enemyThornAttackPositionDistance
+                + GameConfig.enemyThornAttackDistanceTolerance {
+            let attackDirection = fromPlayer.normalized
+            targetPoint = CGPoint(
+                x: playerPosition.x
+                    + attackDirection.dx * GameConfig.enemyThornAttackPositionDistance,
+                y: playerPosition.y
+                    + attackDirection.dy * GameConfig.enemyThornAttackPositionDistance
+            ).clamped(in: mapSafeRect)
+        }
+
         let toTarget = CGVector(dx: targetPoint.x - position.x, dy: targetPoint.y - position.y)
         let distance = toTarget.length
-        let followSpeed = GameConfig.enemySpeed * GameConfig.enemyAnchorFollowStrength
-        let maxStep = min(distance, followSpeed * CGFloat(deltaTime))
-        let delta = distance > 0 ? toTarget.normalized * maxStep : .zero
-        let nextPosition = CGPoint(x: position.x + delta.dx, y: position.y + delta.dy)
-        position = nextPosition.clamped(
-            in: mapRect.insetBy(dx: GameConfig.enemyCollisionRadius, dy: GameConfig.enemyCollisionRadius)
+        // Keep every movement state at the player's ground speed. In
+        // particular, leaving the camera no longer triggers a catch-up boost;
+        // the enemy is allowed to remain off-screen while it walks back in.
+        let followSpeed = GameConfig.enemySpeed
+        let slowdown = min(1, distance / max(1, GameConfig.enemySlowdownDistance))
+        let desiredVelocity = distance > 0
+            ? toTarget.normalized * (followSpeed * slowdown)
+            : .zero
+        let steeringBlend = min(1, CGFloat(deltaTime) * GameConfig.enemySteeringResponse)
+        movementVelocity = CGVector(
+            dx: movementVelocity.dx + (desiredVelocity.dx - movementVelocity.dx) * steeringBlend,
+            dy: movementVelocity.dy + (desiredVelocity.dy - movementVelocity.dy) * steeringBlend
         )
+        let proposedDelta = movementVelocity * CGFloat(deltaTime)
+        let delta = proposedDelta.length > distance && distance > 0
+            ? toTarget
+            : proposedDelta
+        let nextPosition = CGPoint(x: position.x + delta.dx, y: position.y + delta.dy)
+        position = nextPosition.clamped(in: mapSafeRect)
 
         lastDelta = deltaTime > 0 ? CGVector(dx: delta.dx / CGFloat(deltaTime), dy: delta.dy / CGFloat(deltaTime)) : .zero
-        if lastDelta.length > 1 {
-            facingAngle = atan2(lastDelta.dx, -lastDelta.dy)
+        if attackFacingLockTimer <= 0, lastDelta.length > 2 {
+            let desiredFacingAngle = atan2(lastDelta.dx, -lastDelta.dy)
+            facingAngle = rotatedAngle(
+                from: facingAngle,
+                toward: desiredFacingAngle,
+                maxStep: GameConfig.enemyFacingTurnRate * CGFloat(deltaTime)
+            )
         }
-        let movementStrength = min(1, distance > 0 ? maxStep / max(1, followSpeed * CGFloat(deltaTime)) : 0)
-        rig.update(deltaTime: deltaTime, velocity: lastDelta, movementStrength: movementStrength)
+        let movementStrength = min(1, lastDelta.length / max(1, GameConfig.enemySpeed))
+        rig.update(
+            deltaTime: deltaTime,
+            facingAngle: facingAngle,
+            movementStrength: movementStrength
+        )
         updateDirectionalHeight()
         shadowNode.xScale = 1 - movementStrength * 0.06
         shadowNode.yScale = 1 - movementStrength * 0.10
+    }
+
+    func faceAttack(toward targetPoint: CGPoint) {
+        let attackDirection = CGVector(
+            dx: targetPoint.x - position.x,
+            dy: targetPoint.y - position.y
+        )
+        guard attackDirection.length > 0 else { return }
+        facingAngle = atan2(attackDirection.dx, -attackDirection.dy)
+        attackFacingLockTimer = GameConfig.enemyThrowDuration
+        rig.setFacingAngle(facingAngle)
+        updateDirectionalHeight()
+    }
+
+    func setWallRecoveryActive(_ active: Bool) {
+        guard active != isWallRecoveryActive else { return }
+        isWallRecoveryActive = active
+        hasReachedWallRecoveryPosition = false
+        burstShotsRemaining = 0
+        movementMode = .orbiting
+        decisionTimer = 0
+
+        if active {
+            targetLateralBias = 0
+            targetVerticalBias = 0
+        } else {
+            nextFireTimer = max(
+                nextFireTimer,
+                TimeInterval.random(in: GameConfig.enemyApproachAttackDelayRange)
+            )
+            chooseNewBias()
+        }
+    }
+
+    func updateStationaryPose(deltaTime: TimeInterval) {
+        attackFacingLockTimer = max(0, attackFacingLockTimer - deltaTime)
+        rig.update(
+            deltaTime: deltaTime,
+            facingAngle: facingAngle,
+            movementStrength: 0
+        )
+        updateDirectionalHeight()
     }
 
     func updateReload(deltaTime: TimeInterval) {
@@ -121,35 +380,159 @@ final class EnemyNode: SKNode {
             if throwReleaseTimer <= 0 {
                 isThrowQueued = false
                 rig.releaseProjectile()
-                return .releaseProjectile
+                guard let queuedShotContext else { return .none }
+                self.queuedShotContext = nil
+                return .releaseProjectile(queuedShotContext)
             }
             return .none
         }
 
         nextFireTimer -= deltaTime
+        if isWallRecoveryActive && !hasReachedWallRecoveryPosition {
+            return .none
+        }
         guard nextFireTimer <= 0, ammo > 0 else { return .none }
+        guard currentPlayerDistance <= GameConfig.enemyThornAttackPositionDistance
+            + GameConfig.enemyThornAttackDistanceTolerance else { return .none }
+        if isArenaEdgePressureActive {
+            guard currentPlayerDistance >= GameConfig.enemyThornAttackPositionDistance
+                - GameConfig.enemyThornAttackDistanceTolerance else { return .none }
+        }
+        if movementMode == .approaching,
+           currentPlayerDistance > GameConfig.enemyApproachFireDistance {
+            return .none
+        }
 
+        if burstShotsRemaining == 0 {
+            beginBurst()
+        }
+
+        let shotContext = ShotContext(
+            burstIndex: activeBurstShotIndex,
+            burstCount: activeBurstSize,
+            aimStyle: activeAimStyles[activeBurstShotIndex]
+        )
+        queuedShotContext = shotContext
+        activeBurstShotIndex += 1
+        burstShotsRemaining -= 1
         ammo -= 1
-        nextFireTimer = GameConfig.autoAttackTestEnabled
-            ? GameConfig.autoAttackRepeatFireDelay
-            : TimeInterval.random(in: GameConfig.enemyAttackIntervalRange)
+
+        if GameConfig.autoAttackTestEnabled {
+            burstShotsRemaining = 0
+            nextFireTimer = GameConfig.autoAttackRepeatFireDelay
+        } else if burstShotsRemaining > 0 {
+            nextFireTimer = TimeInterval.random(in: GameConfig.enemyBurstShotDelayRange)
+        } else if isWallRecoveryActive {
+            nextFireTimer = TimeInterval.random(
+                in: GameConfig.enemyWallRecoveryAttackIntervalRange
+            )
+        } else {
+            nextFireTimer = TimeInterval.random(in: GameConfig.enemyAttackIntervalRange)
+        }
         throwReleaseTimer = GameConfig.enemyThrowReleaseTime
         isThrowQueued = true
         rig.beginThrow()
         rig.setAmmoRatio(CGFloat(ammo) / CGFloat(GameConfig.maxAmmo))
-        return .beganThrow
+        if movementMode == .approaching {
+            beginRetreat()
+        }
+        return .beganThrow(shotContext)
+    }
+
+    private func beginBurst() {
+        let requestedShotCount = GameConfig.autoAttackTestEnabled
+            || movementMode == .approaching
+            ? 1
+            : randomBurstSize()
+        activeBurstSize = min(requestedShotCount, ammo)
+        burstShotsRemaining = activeBurstSize
+        activeBurstShotIndex = 0
+
+        // Keep the automated visual check deterministic. Normal combat shuffles
+        // the three aim types so rapid shots pressure different dodge lines.
+        if GameConfig.autoAttackTestEnabled {
+            activeAimStyles = [.direct]
+        } else if isArenaEdgePressureActive {
+            // A stationary player must not become safe just by occupying an
+            // arena corner. Start every edge-pressure group on the player;
+            // follow-up shots still cover random escape lines.
+            activeAimStyles = [.direct]
+            if activeBurstSize > 1 {
+                activeAimStyles.append(
+                    contentsOf: Array([AimStyle.smallOffset, .largeOffset]
+                        .shuffled()
+                        .prefix(activeBurstSize - 1))
+                )
+            }
+        } else {
+            activeAimStyles = Array(AimStyle.allCases.shuffled().prefix(activeBurstSize))
+        }
+    }
+
+    private func randomBurstSize() -> Int {
+        let totalWeight = GameConfig.enemySingleShotWeight
+            + GameConfig.enemyDoubleShotWeight
+            + GameConfig.enemyTripleShotWeight
+        let roll = Int.random(in: 0..<totalWeight)
+        if roll < GameConfig.enemySingleShotWeight {
+            return 1
+        }
+        if roll < GameConfig.enemySingleShotWeight + GameConfig.enemyDoubleShotWeight {
+            return 2
+        }
+        return 3
     }
 
     private func chooseBias() {
+        if isWallRecoveryActive {
+            chooseNewBias()
+            return
+        }
+        if movementMode == .retreating {
+            chooseNewBias()
+            return
+        }
+
         let baseRange = GameConfig.mapSize.width * GameConfig.enemyHorizontalDriftRangeRatio
-        lateralBias = CGFloat.random(in: -baseRange...baseRange)
-        verticalBias = CGFloat.random(in: -GameConfig.enemyVerticalDrift...GameConfig.enemyVerticalDrift)
+        targetLateralBias = CGFloat.random(in: -baseRange...baseRange)
+        targetVerticalBias = CGFloat.random(in: GameConfig.enemyVerticalDriftRange)
+        let canStartApproach = !isThrowQueued && burstShotsRemaining == 0
+        if canStartApproach, CGFloat.random(in: 0...1) < GameConfig.enemyApproachChance {
+            movementMode = .approaching
+            nextFireTimer = min(
+                nextFireTimer,
+                TimeInterval.random(in: GameConfig.enemyApproachAttackDelayRange)
+            )
+        } else {
+            movementMode = .orbiting
+        }
+        chooseNewBias()
+    }
+
+    private func beginRetreat() {
+        movementMode = .retreating
+        targetVerticalBias = GameConfig.tileSize * 1.0
+        decisionTimer = 0
+        decisionDuration = GameConfig.enemyDecisionDurationRange.upperBound
+    }
+
+    private func finishRetreat() {
+        movementMode = .orbiting
+        targetVerticalBias = CGFloat.random(in: (GameConfig.tileSize * 0.15)...(GameConfig.tileSize * 1.0))
         chooseNewBias()
     }
 
     private func chooseNewBias() {
         decisionTimer = 0
         decisionDuration = TimeInterval.random(in: GameConfig.enemyDecisionDurationRange)
+    }
+
+    private func rotatedAngle(from current: CGFloat, toward target: CGFloat, maxStep: CGFloat) -> CGFloat {
+        let fullTurn = CGFloat.pi * 2
+        var difference = (target - current).truncatingRemainder(dividingBy: fullTurn)
+        if difference > .pi { difference -= fullTurn }
+        if difference < -.pi { difference += fullTurn }
+        return current + min(max(difference, -maxStep), maxStep)
     }
 
     private func updateDirectionalHeight() {
@@ -224,16 +607,15 @@ private final class EnemyFigureRig {
         rightLegPivot.eulerAngles = SCNVector3(0, 0, 0)
         leftArmPivot.eulerAngles = SCNVector3(0, 0, 0)
         rightArmPivot.eulerAngles = SCNVector3(0, 0, 0)
+        leftArmPivot.position = SCNVector3(-0.31, 0.34, 0.10)
+        rightArmPivot.position = SCNVector3(0.31, 0.34, 0.10)
         projectileNode.isHidden = false
         hasReleasedProjectile = false
         setAmmoRatio(1)
     }
 
-    func update(deltaTime: TimeInterval, velocity: CGVector, movementStrength: CGFloat) {
-        if velocity.length > 1 {
-            let facingAngle = atan2(velocity.dx, -velocity.dy)
-            rootNode.eulerAngles.y = Float(facingAngle)
-        }
+    func update(deltaTime: TimeInterval, facingAngle: CGFloat, movementStrength: CGFloat) {
+        rootNode.eulerAngles.y = Float(facingAngle)
 
         let clampedStrength = min(1, max(0, movementStrength))
         walkPhase += CGFloat(deltaTime) * (6.4 + clampedStrength * 3.2)
@@ -245,29 +627,50 @@ private final class EnemyFigureRig {
         let legSwing = sin(walkPhase) * 0.42 * clampedStrength
         let armSwing = sin(walkPhase) * 0.24 * clampedStrength
         let bodyBob = abs(sin(walkPhase)) * 0.08 * clampedStrength
-        let throwWindup = easedPhase(progress: throwProgress, start: 0.0, end: 0.24)
-        let throwRelease = easedPhase(progress: throwProgress, start: 0.24, end: 0.60)
-        let throwFollowThrough = easedPhase(progress: throwProgress, start: 0.60, end: 1.0)
-        let throwArm = throwWindup * 2.12 - throwRelease * 3.82 + throwFollowThrough * 0.40
-        let torsoTwist = throwRelease * 0.54 - throwWindup * 0.30
-        let torsoLean = throwWindup * 0.34 - throwRelease * 0.12
+        let throwWindup = easedPhase(progress: throwProgress, start: 0.0, end: 0.32)
+        let throwRelease = easedPhase(progress: throwProgress, start: 0.32, end: 0.52)
+        let throwFollowThrough = easedPhase(progress: throwProgress, start: 0.52, end: 0.74)
+        let throwRecover = easedPhase(progress: throwProgress, start: 0.74, end: 1.0)
+        let poseWeight = 1 - throwRecover
+
+        // Reference motion: right shoulder pulls back, the hand rises clearly
+        // above the head, then snaps forward and down through an overhand arc.
+        let throwingArmLift = (2.72 * throwWindup - 1.52 * throwRelease - 0.84 * throwFollowThrough) * poseWeight
+        let throwingArmDepth = (0.82 * throwWindup - 1.58 * throwRelease - 0.28 * throwFollowThrough) * poseWeight
+        let throwingArmSweep = (-0.74 * throwWindup + 0.92 * throwRelease + 0.18 * throwFollowThrough) * poseWeight
+        let torsoTwist = (0.58 * throwWindup - 0.94 * throwRelease + 0.20 * throwFollowThrough) * poseWeight
+        let torsoLean = (-0.16 * throwWindup + 0.34 * throwRelease + 0.10 * throwFollowThrough) * poseWeight
+        let throwCrouch = (0.08 * throwWindup - 0.05 * throwRelease) * poseWeight
+        let throwingShoulderLift = (0.82 * throwWindup - 0.60 * throwRelease - 0.22 * throwFollowThrough) * poseWeight
+        let throwingShoulderTuck = (-0.10 * throwWindup + 0.08 * throwRelease) * poseWeight
 
         if !hasReleasedProjectile, throwProgress >= CGFloat(GameConfig.enemyThrowReleaseTime / GameConfig.enemyThrowDuration) {
             projectileNode.isHidden = true
             hasReleasedProjectile = true
         }
 
-        bodyNode.position.y = 0.68 + Float(bodyBob)
+        bodyNode.position.y = 0.68 + Float(bodyBob - throwCrouch)
         torsoNode.eulerAngles.y = Float(torsoTwist)
-        torsoNode.eulerAngles.z = Float(-torsoTwist * 0.18)
+        torsoNode.eulerAngles.z = Float(-torsoTwist * 0.16)
         bodyNode.eulerAngles.x = Float(torsoLean)
         leftLegPivot.eulerAngles.x = Float(-legSwing)
         rightLegPivot.eulerAngles.x = Float(legSwing)
-        leftArmPivot.eulerAngles.x = Float(armSwing - throwRelease * 0.08)
-        rightArmPivot.eulerAngles.x = Float(-0.28 - armSwing + throwArm)
-        leftArmPivot.eulerAngles.z = Float(0.10 + throwRelease * 0.03)
-        rightArmPivot.eulerAngles.y = Float(-0.34 - throwWindup * 1.12 + throwRelease * 0.34)
-        rightArmPivot.eulerAngles.z = Float(-0.66 - throwWindup * 0.56 + throwRelease * 1.20 - throwFollowThrough * 0.34)
+        leftArmPivot.position = SCNVector3(
+            -0.31 - Float(throwingShoulderTuck),
+            0.34 + Float(throwingShoulderLift),
+            0.10
+        )
+        leftArmPivot.eulerAngles.x = Float(-0.18 + armSwing + throwingArmDepth)
+        leftArmPivot.eulerAngles.y = Float(0.22 - throwingArmSweep)
+        leftArmPivot.eulerAngles.z = Float(0.34 - throwingArmLift)
+        rightArmPivot.position = SCNVector3(0.31, 0.34, 0.10)
+        rightArmPivot.eulerAngles.x = Float(-armSwing - throwRelease * 0.16 * poseWeight)
+        rightArmPivot.eulerAngles.y = 0
+        rightArmPivot.eulerAngles.z = Float(-0.10 - throwWindup * 0.20 * poseWeight)
+    }
+
+    func setFacingAngle(_ angle: CGFloat) {
+        rootNode.eulerAngles.y = Float(angle)
     }
 
     func setAmmoRatio(_ ratio: CGFloat) {
@@ -303,8 +706,10 @@ private final class EnemyFigureRig {
         camera.zNear = 0.01
         camera.zFar = 20
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, 3.26, 2.40)
-        cameraNode.eulerAngles = SCNVector3(-0.71, 0, 0)
+        // Match the player's five-degree steeper view while preserving the
+        // distance to the enemy model's visual center.
+        cameraNode.position = SCNVector3(0, 3.461, 2.211)
+        cameraNode.eulerAngles = SCNVector3(-0.7973, 0, 0)
         scene.rootNode.addChildNode(cameraNode)
     }
 
@@ -403,8 +808,8 @@ private final class EnemyFigureRig {
             color: UIColor(red: 0.86, green: 0.24, blue: 0.14, alpha: 1),
             emission: UIColor(red: 0.52, green: 0.08, blue: 0.03, alpha: 0.58)
         )
-        projectileNode.position = SCNVector3(0.18, -0.10, 0.18)
-        rightHandNode.addChildNode(projectileNode)
+        projectileNode.position = SCNVector3(-0.18, -0.10, 0.18)
+        leftHandNode.addChildNode(projectileNode)
 
         for angle in stride(from: 0.0, to: Double.pi * 2, by: Double.pi / 3) {
             let spike = SCNNode(geometry: SCNCone(topRadius: 0.0, bottomRadius: 0.035, height: 0.16))
