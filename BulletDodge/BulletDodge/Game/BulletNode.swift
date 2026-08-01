@@ -128,19 +128,12 @@ final class BulletNode: SKNode {
         let spriteSize: CGSize
         switch kind {
         case .thornBall:
-            // Compensate for transparent padding in the 512 px source image so the
-            // non-transparent projectile itself measures exactly 5 mm on screen.
-            spriteSize = CGSize(
-                width: GameConfig.thornBallVisualDiameter / 0.7097,
-                height: GameConfig.thornBallVisualDiameter / 0.6922
-            )
+            spriteSize = GameConfig.thornBallSpriteSize
         case .thornShard:
-            // The originalized source points horizontally right. Compensate for its
-            // transparent padding so the visible thorn stays exactly 4 x 2.5 mm.
-            spriteSize = CGSize(
-                width: GameConfig.thornShardVisualLength / 0.5227,
-                height: GameConfig.thornShardVisualWidth / 0.5282
-            )
+            // The source points horizontally right. Its size is compensated
+            // against the current screen direction so the visible thorn remains
+            // 3.15 mm long and 2.0 mm wide after camera projection.
+            spriteSize = GameConfig.thornShardSpriteSize(for: direction)
         }
         spriteNode = SKSpriteNode(texture: spriteTexture, size: spriteSize)
 
@@ -174,11 +167,12 @@ final class BulletNode: SKNode {
     }
 
     static func thornBall(direction: CGVector) -> BulletNode {
-        BulletNode(
+        let calibratedRange = GameConfig.thornBallWorldRange(for: direction)
+        return BulletNode(
             kind: .thornBall,
             direction: direction,
-            moveSpeed: GameConfig.thornBallSpeed,
-            range: GameConfig.thornBallRange,
+            moveSpeed: calibratedRange / CGFloat(GameConfig.thornBallLifetime),
+            range: calibratedRange,
             damage: GameConfig.thornBallDamage,
             radius: GameConfig.thornBallRadius,
             contactRadius: GameConfig.thornBallContactRadius,
@@ -392,8 +386,11 @@ final class BulletNode: SKNode {
         case .thornBall:
             zRotation = 0
             visualRoot.position = .zero
-            visualRoot.zRotation += CGFloat(deltaTime) * 2.8
-            visualRoot.setScale(1.0 + (pulse - 1) * 0.20)
+            // Rotating a non-uniformly compensated quad would make the projected
+            // 4 mm circle breathe between wide and tall. Keep the ball bounds
+            // fixed; the independent orbit effect still supplies visible spin.
+            visualRoot.zRotation = 0
+            visualRoot.setScale(1.0)
             spriteNode.alpha = 1.0
             orbitRoot.zRotation -= CGFloat(deltaTime) * 7.2
             orbitRoot.alpha = 0.72 + sin(CGFloat(lifetime) * 18) * 0.12
@@ -410,7 +407,8 @@ final class BulletNode: SKNode {
             // Only the thorn art follows the delayed turn toward the path tangent.
             zRotation = 0
             visualRoot.zRotation = heading
-            visualRoot.setScale(0.96 + min(CGFloat(lifetime) * 0.75, 0.10))
+            spriteNode.size = GameConfig.thornShardSpriteSize(for: visualDirection)
+            visualRoot.setScale(1.0)
             shadowNode.position = CGPoint(
                 x: GameConfig.thornShardVisualLength * 0.05,
                 y: -GameConfig.thornShardVisualWidth * 0.78

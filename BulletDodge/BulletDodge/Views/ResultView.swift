@@ -12,158 +12,320 @@ struct ResultView: View {
     @State private var appeared = false
 
     private var rank: ResultRank {
-        ResultRank(survivalTime: result.survivalTime, hitCount: result.hitCount)
+        ResultRank(survivalTime: result.survivalTime)
     }
 
     var body: some View {
         GeometryReader { geometry in
-            let isLandscape = geometry.size.width > geometry.size.height * 1.25
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let scale = min(width / 1846, height / 852)
 
             ZStack {
-                ArenaShellBackground(glowColor: rank.color)
+                resultBackground(width: width, height: height)
 
-                ScrollView(showsIndicators: false) {
-                    Group {
-                        if isLandscape {
-                            HStack(spacing: 22) {
-                                summaryPanel
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                detailPanel
-                                    .frame(width: min(470, geometry.size.width * 0.52))
-                            }
-                        } else {
-                            VStack(spacing: 20) {
-                                summaryPanel
-                                    .frame(minHeight: 350)
-                                detailPanel
-                            }
-                        }
-                    }
-                    .padding(.horizontal, isLandscape ? 28 : 20)
-                    .padding(.vertical, isLandscape ? 20 : 28)
-                    .frame(minHeight: geometry.size.height)
-                }
+                identityColumn(scale: scale)
+                    .frame(width: 520 * scale, height: 742 * scale)
+                    .position(x: 410 * scale, y: 422 * scale)
+
+                performanceColumn(scale: scale)
+                    .frame(width: 780 * scale, height: 730 * scale)
+                    .position(x: 1195 * scale, y: 414 * scale)
             }
+            .frame(width: width, height: height)
+            .clipped()
         }
+        .ignoresSafeArea()
         .statusBarHidden(true)
         .onAppear {
-            withAnimation(.spring(response: 0.66, dampingFraction: 0.82)) {
+            withAnimation(.spring(response: 0.64, dampingFraction: 0.86)) {
                 appeared = true
             }
         }
     }
 
-    private var summaryPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            AppMark()
-
-            Spacer(minLength: 10)
-
-            HStack(spacing: 22) {
-                RankEmblem(rank: rank)
-                    .frame(width: 142, height: 142)
-                    .scaleEffect(appeared ? 1 : 0.74)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    ModeTag(text: "Training complete", color: rank.color)
-
-                    Text(rank.headline)
-                        .font(.system(size: 33, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.7)
-
-                    Text(rank.message)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(GameTheme.softText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer(minLength: 12)
-
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(String(format: "%.1f", result.survivalTime))
-                    .font(.system(size: 48, weight: .black, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                Text("SECONDS")
-                    .font(.system(size: 10, weight: .black, design: .rounded))
-                    .tracking(1.4)
-                    .foregroundStyle(rank.color)
-            }
-        }
-        .padding(6)
-        .opacity(appeared ? 1 : 0)
-        .offset(x: appeared ? 0 : -18)
+    private func resultBackground(width: CGFloat, height: CGFloat) -> some View {
+        Image("result_ledger_opaque_bg")
+            .resizable()
+            .scaledToFill()
+            .frame(width: width, height: height)
+            .clipped()
+            .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
 
-    private var detailPanel: some View {
-        GameChromePanel {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("RUN SUMMARY")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .tracking(1.5)
-                            .foregroundStyle(.white)
-                        Text("今回のトレーニング結果")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(GameTheme.softText)
-                    }
+    private func identityColumn(scale: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Text(L10n.text("result.training_complete"))
+                .font(.system(size: 82 * scale, weight: .black, design: .rounded))
+                .tracking(-3 * scale)
+                .foregroundStyle(Color(red: 0.12, green: 0.10, blue: 0.075))
+                .lineLimit(1)
+                .minimumScaleFactor(0.68)
+                .padding(.top, 38 * scale)
 
-                    Spacer()
+            ornamentedLabel(L10n.text("stats.rank"), scale: scale)
+                .padding(.top, 36 * scale)
 
-                    Text("回避率 \(avoidanceRate)%")
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                        .foregroundStyle(GameTheme.mint)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(GameTheme.mint.opacity(0.11), in: Capsule())
-                }
-
-                HStack(spacing: 9) {
-                    ResultStat(icon: "sparkles", label: "DODGED", value: "\(result.dodgedCount)", color: GameTheme.cyan)
-                    ResultStat(icon: "burst.fill", label: "HITS", value: "\(result.hitCount)", color: GameTheme.coral)
-                    ResultStat(icon: "gauge.with.dots.needle.67percent", label: "RANK", value: rank.letter, color: rank.color)
-                }
-
-                HStack(spacing: 10) {
-                    MetricTile(
-                        icon: "trophy.fill",
-                        title: "BEST TIME",
-                        value: String(format: "%.1fs", bestSurvivalTime),
-                        accent: GameTheme.gold,
-                        badge: didSetTimeRecord ? "NEW" : nil
+            Text(rank.letter)
+                .font(.system(size: 348 * scale, weight: .black, design: .serif))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.99, green: 0.84, blue: 0.43),
+                            Color(red: 0.72, green: 0.43, blue: 0.11),
+                            Color(red: 0.94, green: 0.68, blue: 0.23)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
-                    MetricTile(
-                        icon: "star.fill",
-                        title: "BEST DODGE",
-                        value: "\(bestDodgedCount)",
-                        accent: GameTheme.cyan,
-                        badge: didSetDodgedRecord ? "NEW" : nil
-                    )
-                }
+                )
+                .shadow(color: Color(red: 0.30, green: 0.19, blue: 0.07), radius: 1 * scale)
+                .shadow(color: .black.opacity(0.30), radius: 5 * scale, y: 7 * scale)
+                .frame(height: 312 * scale)
+                .scaleEffect(appeared ? 1 : 0.80)
+                .opacity(appeared ? 1 : 0)
 
-                HStack(spacing: 10) {
-                    GamePrimaryButton(
-                        title: "もう一度挑戦",
-                        systemImage: "arrow.clockwise",
-                        action: onRetry
-                    )
+            Text(rank.message)
+                .font(.system(size: 21 * scale, weight: .bold, design: .rounded))
+                .foregroundStyle(Color(red: 0.16, green: 0.13, blue: 0.09))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.72)
+                .frame(width: 500 * scale)
+                .padding(.top, 12 * scale)
 
-                    GameSecondaryButton(
-                        title: "ホーム",
-                        systemImage: "house.fill",
-                        action: onHome
-                    )
-                    .frame(maxWidth: 140)
-                }
-            }
-            .padding(20)
+            ornamentLine(scale: scale)
+                .frame(width: 330 * scale)
+                .padding(.top, 24 * scale)
         }
         .opacity(appeared ? 1 : 0)
-        .offset(x: appeared ? 0 : 22)
+        .offset(x: appeared ? 0 : -18 * scale)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func ornamentedLabel(_ text: String, scale: CGFloat) -> some View {
+        HStack(spacing: 12 * scale) {
+            ornamentLine(scale: scale)
+            Text(text)
+                .font(.system(size: 28 * scale, weight: .black, design: .rounded))
+                .foregroundStyle(Color(red: 0.57, green: 0.38, blue: 0.14))
+                .lineLimit(1)
+            ornamentLine(scale: scale)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(L10n.format("accessibility.rank", rank.letter))
+    }
+
+    private func ornamentLine(scale: CGFloat) -> some View {
+        HStack(spacing: 5 * scale) {
+            Rectangle()
+                .fill(Color(red: 0.64, green: 0.45, blue: 0.20).opacity(0.78))
+                .frame(height: max(1, 1.5 * scale))
+            Image(systemName: "diamond.fill")
+                .font(.system(size: 9 * scale, weight: .bold))
+                .foregroundStyle(Color(red: 0.73, green: 0.50, blue: 0.18))
+            Rectangle()
+                .fill(Color(red: 0.64, green: 0.45, blue: 0.20).opacity(0.78))
+                .frame(height: max(1, 1.5 * scale))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func performanceColumn(scale: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Text(L10n.text("result.survival_time"))
+                .font(.system(size: 24 * scale, weight: .black, design: .rounded))
+                .tracking(3.2 * scale)
+                .foregroundStyle(Color(red: 0.12, green: 0.25, blue: 0.25))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(alignment: .firstTextBaseline, spacing: 9 * scale) {
+                Text(L10n.format("format.decimal_one", result.survivalTime))
+                    .font(.system(size: 160 * scale, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .tracking(-5 * scale)
+                    .foregroundStyle(Color(red: 0.02, green: 0.61, blue: 0.70))
+                    .shadow(color: .white.opacity(0.85), radius: 1 * scale, y: 1 * scale)
+                    .shadow(color: Color(red: 0.02, green: 0.22, blue: 0.25).opacity(0.20), radius: 2 * scale, y: 2 * scale)
+
+                Text(L10n.text("result.seconds"))
+                    .font(.system(size: 32 * scale, weight: .black, design: .rounded))
+                    .foregroundStyle(Color(red: 0.02, green: 0.42, blue: 0.48))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : -14 * scale)
+
+            completionRule(scale: scale)
+                .padding(.top, 2 * scale)
+
+            VStack(spacing: 0) {
+                resultRow(
+                    label: L10n.text("stats.dodged"),
+                    value: "\(result.dodgedCount)",
+                    accent: Color(red: 0.04, green: 0.22, blue: 0.25),
+                    badge: nil,
+                    scale: scale
+                )
+
+                resultRow(
+                    label: L10n.text("stats.avoidance_rate"),
+                    value: "\(avoidanceRate)%",
+                    accent: Color(red: 0.04, green: 0.22, blue: 0.25),
+                    badge: nil,
+                    scale: scale
+                )
+
+                resultRow(
+                    label: L10n.text("stats.best_short"),
+                    value: formattedBestTime,
+                    accent: Color(red: 0.04, green: 0.22, blue: 0.25),
+                    badge: didSetTimeRecord ? L10n.text("stats.new") : nil,
+                    scale: scale
+                )
+
+                resultRow(
+                    label: L10n.text("stats.best_dodge"),
+                    value: "\(bestDodgedCount)",
+                    accent: Color(red: 0.04, green: 0.22, blue: 0.25),
+                    badge: didSetDodgedRecord ? L10n.text("stats.new") : nil,
+                    scale: scale
+                )
+            }
+            .padding(.top, 5 * scale)
+
+            Spacer(minLength: 18 * scale)
+
+            actionRow(scale: scale)
+                .frame(height: 98 * scale)
+        }
+        .opacity(appeared ? 1 : 0)
+        .offset(x: appeared ? 0 : 18 * scale)
+    }
+
+    private func completionRule(scale: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(GameTheme.cyan.opacity(0.90))
+                .frame(width: 74 * scale, height: max(1, 2 * scale))
+
+            Rectangle()
+                .fill(GameTheme.cyan.opacity(0.90))
+                .frame(maxWidth: .infinity)
+                .frame(height: max(1, 2 * scale))
+
+            Circle()
+                .fill(GameTheme.cyan)
+                .frame(width: 10 * scale, height: 10 * scale)
+                .shadow(color: GameTheme.cyan.opacity(0.55), radius: 5 * scale)
+        }
+    }
+
+    private func resultRow(
+        label: String,
+        value: String,
+        accent: Color,
+        badge: String?,
+        scale: CGFloat
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 13 * scale) {
+                Text(label)
+                    .font(.system(size: 27 * scale, weight: .black, design: .rounded))
+                    .foregroundStyle(Color(red: 0.15, green: 0.12, blue: 0.08))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Spacer(minLength: 12 * scale)
+
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 12 * scale, weight: .black, design: .rounded))
+                        .foregroundStyle(Color(red: 0.16, green: 0.10, blue: 0.03))
+                        .padding(.horizontal, 9 * scale)
+                        .padding(.vertical, 5 * scale)
+                        .background(GameTheme.gold, in: RoundedRectangle(cornerRadius: 6 * scale))
+                }
+
+                Text(value)
+                    .font(.system(size: 45 * scale, weight: .medium, design: .serif))
+                    .monospacedDigit()
+                    .foregroundStyle(accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.66)
+            }
+            .frame(height: 68 * scale)
+
+            HStack(spacing: 8 * scale) {
+                Image(systemName: "diamond.fill")
+                    .font(.system(size: 7 * scale, weight: .bold))
+                    .foregroundStyle(Color(red: 0.69, green: 0.48, blue: 0.20))
+                Rectangle()
+                    .fill(Color(red: 0.61, green: 0.44, blue: 0.23).opacity(0.70))
+                    .frame(height: max(1, 1.25 * scale))
+                Image(systemName: "diamond.fill")
+                    .font(.system(size: 7 * scale, weight: .bold))
+                    .foregroundStyle(Color(red: 0.69, green: 0.48, blue: 0.20))
+            }
+        }
+    }
+
+    private func actionRow(scale: CGFloat) -> some View {
+        HStack(spacing: 26 * scale) {
+            Button(action: onRetry) {
+                HStack(spacing: 15 * scale) {
+                    Text(L10n.text("result.retry"))
+                        .font(.system(size: 31 * scale, weight: .black, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.66)
+
+                    Spacer(minLength: 4 * scale)
+
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 27 * scale, weight: .black))
+                }
+                .foregroundStyle(Color(red: 0.11, green: 0.075, blue: 0.025))
+                .padding(.horizontal, 38 * scale)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 1.00, green: 0.83, blue: 0.35),
+                            Color(red: 0.86, green: 0.59, blue: 0.17)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: Capsule()
+                )
+                .overlay {
+                    Capsule()
+                        .stroke(Color(red: 0.25, green: 0.16, blue: 0.05), lineWidth: 3 * scale)
+                        .padding(2 * scale)
+                }
+                .shadow(color: .black.opacity(0.24), radius: 8 * scale, y: 6 * scale)
+            }
+            .buttonStyle(ResultPressButtonStyle())
+
+            Button(action: onHome) {
+                HStack(spacing: 10 * scale) {
+                    Image(systemName: "house.fill")
+                    Text(L10n.text("result.home"))
+                        .lineLimit(1)
+                }
+                .font(.system(size: 24 * scale, weight: .black, design: .rounded))
+                .foregroundStyle(Color(red: 0.94, green: 0.90, blue: 0.79))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(red: 0.09, green: 0.085, blue: 0.075).opacity(0.94), in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(Color(red: 0.53, green: 0.35, blue: 0.12), lineWidth: 2 * scale)
+                }
+            }
+            .buttonStyle(ResultPressButtonStyle())
+            .frame(width: 240 * scale)
+        }
     }
 
     private var avoidanceRate: Int {
@@ -171,77 +333,19 @@ struct ResultView: View {
         guard total > 0 else { return 0 }
         return Int((Double(result.dodgedCount) / Double(total) * 100).rounded())
     }
-}
 
-private struct ResultStat: View {
-    let icon: String
-    let label: String
-    let value: String
-    let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(color)
-                Spacer()
-                Text(label)
-                    .font(.system(size: 8, weight: .black, design: .rounded))
-                    .tracking(0.8)
-                    .foregroundStyle(GameTheme.softText)
-            }
-
-            Text(value)
-                .font(.system(size: 26, weight: .black, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.white)
-        }
-        .padding(13)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .stroke(color.opacity(0.18), lineWidth: 1)
-        }
+    private var formattedBestTime: String {
+        guard bestSurvivalTime > 0 else { return "—" }
+        return L10n.format("format.seconds_short", bestSurvivalTime)
     }
 }
 
-private struct RankEmblem: View {
-    let rank: ResultRank
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(GameTheme.midnight.opacity(0.72))
-                .overlay {
-                    Circle()
-                        .stroke(
-                            AngularGradient(
-                                colors: [rank.color.opacity(0.25), rank.color, .white.opacity(0.7), rank.color.opacity(0.25)],
-                                center: .center
-                            ),
-                            lineWidth: 7
-                        )
-                }
-                .shadow(color: rank.color.opacity(0.30), radius: 20)
-
-            Circle()
-                .stroke(.white.opacity(0.10), style: StrokeStyle(lineWidth: 1, dash: [3, 6]))
-                .padding(13)
-
-            VStack(spacing: -4) {
-                Text("RANK")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
-                    .tracking(1.6)
-                    .foregroundStyle(GameTheme.softText)
-                Text(rank.letter)
-                    .font(.system(size: 68, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("ランク \(rank.letter)")
+private struct ResultPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .brightness(configuration.isPressed ? -0.06 : 0)
+            .animation(.easeOut(duration: 0.11), value: configuration.isPressed)
     }
 }
 
@@ -251,26 +355,26 @@ private struct ResultRank {
     let message: String
     let color: Color
 
-    init(survivalTime: TimeInterval, hitCount: Int) {
-        if survivalTime >= 45, hitCount <= 2 {
+    init(survivalTime: TimeInterval) {
+        if survivalTime >= 45 {
             letter = "S"
-            headline = "圧倒的な回避だ"
-            message = "弾幕の流れを完全に読み切った。次は自己ベストを更新しよう。"
+            headline = L10n.text("rank.s.headline")
+            message = L10n.text("rank.s.message")
             color = GameTheme.gold
-        } else if survivalTime >= 30 {
+        } else if survivalTime >= 35 {
             letter = "A"
-            headline = "鋭い反応だった"
-            message = "危険な軌道をしっかり見切れている。Sランクはもう目前だ。"
+            headline = L10n.text("rank.a.headline")
+            message = L10n.text("rank.a.message")
             color = GameTheme.mint
-        } else if survivalTime >= 15 {
+        } else if survivalTime >= 20 {
             letter = "B"
-            headline = "いい動きだ"
-            message = "回避のリズムができてきた。次は視野を広く保ってみよう。"
+            headline = L10n.text("rank.b.headline")
+            message = L10n.text("rank.b.message")
             color = GameTheme.cyan
         } else {
             letter = "C"
-            headline = "次はもっと行ける"
-            message = "敵の予備動作を見れば軌道を先読みできる。もう一度挑戦しよう。"
+            headline = L10n.text("rank.c.headline")
+            message = L10n.text("rank.c.message")
             color = GameTheme.coral
         }
     }
@@ -279,10 +383,10 @@ private struct ResultRank {
 #Preview("Landscape") {
     ResultView(
         result: GameResult(survivalTime: 31.4, dodgedCount: 62, hitCount: 3),
-        bestSurvivalTime: 41.7,
-        bestDodgedCount: 93,
+        bestSurvivalTime: 104.8,
+        bestDodgedCount: 369,
         didSetTimeRecord: false,
-        didSetDodgedRecord: true,
+        didSetDodgedRecord: false,
         onRetry: {},
         onHome: {}
     )

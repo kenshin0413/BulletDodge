@@ -9,203 +9,254 @@ struct HomeView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let isLandscape = geometry.size.width > geometry.size.height * 1.25
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let scale = min(width / 1846, height / 852)
 
             ZStack {
-                ArenaShellBackground(glowColor: GameTheme.coral)
+                Image("home_hero_battle_aligned")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: height)
+                    .clipped()
+                    .accessibilityHidden(true)
 
-                ScrollView(showsIndicators: false) {
-                    Group {
-                        if isLandscape {
-                            HStack(spacing: 24) {
-                                heroPanel
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.28),
+                        Color.black.opacity(0.10),
+                        .clear
+                    ],
+                    startPoint: .leading,
+                    endPoint: UnitPoint(x: 0.48, y: 0.5)
+                )
+                .allowsHitTesting(false)
 
-                                missionPanel
-                                    .frame(width: min(390, geometry.size.width * 0.43))
-                            }
-                        } else {
-                            VStack(spacing: 20) {
-                                heroPanel
-                                    .frame(minHeight: 390)
-                                missionPanel
-                            }
-                        }
-                    }
-                    .padding(.horizontal, isLandscape ? 28 : 20)
-                    .padding(.vertical, isLandscape ? 20 : 28)
-                    .frame(minHeight: geometry.size.height)
-                }
+                brandLockup(scale: scale)
+                    .frame(width: 760 * scale, alignment: .leading)
+                    .position(x: 515 * scale, y: 286 * scale)
+
+                statsStrip(scale: scale)
+                    .frame(width: 1040 * scale, height: 76 * scale)
+                    .position(x: 630 * scale, y: 742 * scale)
+
+                startButton(scale: scale)
+                    .frame(width: 540 * scale, height: 108 * scale)
+                    .position(x: 1470 * scale, y: 738 * scale)
             }
+            .frame(width: width, height: height)
+            .clipped()
         }
+        .ignoresSafeArea()
         .statusBarHidden(true)
         .onAppear {
-            withAnimation(.spring(response: 0.62, dampingFraction: 0.86)) {
+            withAnimation(.spring(response: 0.58, dampingFraction: 0.88)) {
                 appeared = true
             }
         }
     }
 
-    private var heroPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            AppMark()
+    private func brandLockup(scale: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 8 * scale) {
+            ZStack(alignment: .leading) {
+                Text(L10n.text("app.title"))
+                    .font(.system(size: 188 * scale, weight: .black, design: .rounded))
+                    .tracking(-9 * scale)
+                    .foregroundStyle(GameTheme.coral.opacity(0.55))
+                    .offset(x: 3 * scale, y: 4 * scale)
 
-            Spacer(minLength: 12)
-
-            HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 10) {
-                    ModeTag(text: "Arena online", color: GameTheme.mint)
-
-                    Text("BULLET\nDODGE")
-                        .font(.system(size: 44, weight: .black, design: .rounded))
-                        .tracking(-1.8)
-                        .foregroundStyle(.white)
-                        .lineSpacing(-5)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.68)
-                        .allowsTightening(true)
-
-                    Text("一瞬の判断で、すべてを避けろ。")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(GameTheme.softText)
-                        .lineLimit(2)
-                }
-                .layoutPriority(1)
-
-                Spacer(minLength: 0)
-
-                CharacterStage()
-                    .frame(width: 165, height: 205)
-                    .offset(y: 5)
+                Text(L10n.text("app.title"))
+                    .font(.system(size: 188 * scale, weight: .black, design: .rounded))
+                    .tracking(-9 * scale)
+                    .foregroundStyle(Color(red: 0.98, green: 0.96, blue: 0.89))
+                    .shadow(color: .black.opacity(0.45), radius: 5 * scale, y: 5 * scale)
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.52)
+            .allowsTightening(true)
+
+            HStack(spacing: 14 * scale) {
+                speedLines(color: GameTheme.cyan, scale: scale)
+
+                Text(L10n.text("app.secondary_name"))
+                    .font(.system(size: 62 * scale, weight: .black, design: .rounded))
+                    .italic()
+                    .foregroundStyle(Color(red: 0.97, green: 0.95, blue: 0.88))
+                    .shadow(color: .black.opacity(0.35), radius: 3 * scale, y: 3 * scale)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+
+                speedLines(color: GameTheme.coral, scale: scale)
+            }
+
+            Text(L10n.text("home.tagline"))
+                .font(.system(size: 30 * scale, weight: .semibold, design: .rounded))
+                .tracking(2.1 * scale)
+                .foregroundStyle(.white.opacity(0.94))
+                .shadow(color: .black.opacity(0.45), radius: 3 * scale, y: 2 * scale)
+                .padding(.top, 18 * scale)
         }
-        .padding(6)
         .opacity(appeared ? 1 : 0)
-        .offset(x: appeared ? 0 : -20)
+        .offset(x: appeared ? 0 : -24 * scale)
     }
 
-    private var missionPanel: some View {
-        GameChromePanel {
-            VStack(alignment: .leading, spacing: 15) {
-                HStack {
-                    ModeTag(text: "Survival training")
-                    Spacer()
-                    Text("SOLO")
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                        .tracking(1.4)
-                        .foregroundStyle(GameTheme.gold)
-                }
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("弾幕を読み切れ")
-                        .font(.system(size: 28, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text("敵の投射を見極め、限界までアリーナに残ろう。")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(GameTheme.softText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(spacing: 10) {
-                    MetricTile(
-                        icon: "timer",
-                        title: "BEST TIME",
-                        value: formattedBestTime,
-                        accent: GameTheme.cyan
-                    )
-                    MetricTile(
-                        icon: "sparkles",
-                        title: "BEST DODGE",
-                        value: bestDodgedCount == 0 ? "—" : "\(bestDodgedCount)",
-                        accent: GameTheme.coral
-                    )
-                }
-
-                HStack(spacing: 8) {
-                    TrainingRule(icon: "figure.run", text: "移動で回避")
-                    TrainingRule(icon: "scope", text: "照準を読む")
-                    TrainingRule(icon: "bolt.fill", text: "反応を磨く")
-                }
-
-                GamePrimaryButton(
-                    title: "バトル開始",
-                    subtitle: "TAP TO ENTER THE ARENA",
-                    systemImage: "arrow.right",
-                    action: onStart
-                )
+    private func speedLines(color: Color, scale: CGFloat) -> some View {
+        VStack(spacing: 5 * scale) {
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(color)
+                    .frame(width: (92 - CGFloat(index) * 13) * scale, height: 6 * scale)
             }
-            .padding(22)
         }
+    }
+
+    private func statsStrip(scale: CGFloat) -> some View {
+        HStack(spacing: 26 * scale) {
+            statItem(
+                icon: "crown.fill",
+                label: L10n.text("stats.best_rank"),
+                value: bestRankLetter,
+                color: bestRankColor,
+                scale: scale
+            )
+
+            Rectangle()
+                .fill(.white.opacity(0.48))
+                .frame(width: 1, height: 42 * scale)
+
+            statItem(
+                icon: "timer",
+                label: L10n.text("stats.best_short"),
+                value: formattedBestTime,
+                color: GameTheme.cyan,
+                scale: scale
+            )
+
+            Rectangle()
+                .fill(.white.opacity(0.48))
+                .frame(width: 1, height: 42 * scale)
+
+            statItem(
+                icon: "sparkles",
+                label: L10n.text("stats.best_dodge"),
+                value: bestDodgedCount == 0 ? "—" : "\(bestDodgedCount)",
+                color: GameTheme.coral,
+                scale: scale
+            )
+        }
+        .padding(.horizontal, 28 * scale)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.72))
+                .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
+                .shadow(color: .black.opacity(0.22), radius: 8 * scale, y: 4 * scale)
+        )
         .opacity(appeared ? 1 : 0)
-        .offset(x: appeared ? 0 : 24)
+        .offset(y: appeared ? 0 : 16 * scale)
+    }
+
+    private func statItem(
+        icon: String,
+        label: String,
+        value: String,
+        color: Color,
+        scale: CGFloat
+    ) -> some View {
+        HStack(spacing: 16 * scale) {
+            Image(systemName: icon)
+                .font(.system(size: 31 * scale, weight: .bold))
+                .foregroundStyle(color)
+
+            Text(label)
+                .font(.system(size: 23 * scale, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+
+            Text(value)
+                .font(.system(size: 36 * scale, weight: .black, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1)
+        }
+    }
+
+    private func startButton(scale: CGFloat) -> some View {
+        Button(action: onStart) {
+            HStack(spacing: 18 * scale) {
+                Text(L10n.text("home.start"))
+                    .font(.system(size: 38 * scale, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                Spacer(minLength: 8 * scale)
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 31 * scale, weight: .black))
+            }
+            .foregroundStyle(Color(red: 0.07, green: 0.055, blue: 0.04))
+            .padding(.horizontal, 40 * scale)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(red: 1.00, green: 0.84, blue: 0.34),
+                        Color(red: 0.94, green: 0.65, blue: 0.16)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(Color.black.opacity(0.72), lineWidth: 3 * scale)
+                    .padding(2 * scale)
+            }
+            .shadow(color: .black.opacity(0.28), radius: 8 * scale, y: 5 * scale)
+        }
+        .buttonStyle(HomePressButtonStyle())
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared ? 0 : 18 * scale)
+        .accessibilityHint(L10n.text("home.start_hint"))
     }
 
     private var formattedBestTime: String {
         guard bestSurvivalTime > 0 else { return "—" }
-        return String(format: "%.1fs", bestSurvivalTime)
+        return L10n.format("format.seconds_short", bestSurvivalTime)
     }
-}
 
-private struct CharacterStage: View {
-    var body: some View {
-        ZStack {
-            Ellipse()
-                .fill(.black.opacity(0.30))
-                .frame(width: 145, height: 42)
-                .offset(y: 95)
-                .blur(radius: 4)
+    private var bestRankLetter: String {
+        guard bestSurvivalTime > 0 else { return "—" }
+        switch bestSurvivalTime {
+        case 45...: return "S"
+        case 35...: return "A"
+        case 20...: return "B"
+        default: return "C"
+        }
+    }
 
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [GameTheme.cyan.opacity(0.25), GameTheme.plum.opacity(0.08), .clear],
-                        center: .center,
-                        startRadius: 4,
-                        endRadius: 95
-                    )
-                )
-                .overlay {
-                    Circle()
-                        .stroke(GameTheme.cyan.opacity(0.22), lineWidth: 1)
-                        .padding(16)
-                }
-
-            Image(uiImage: PlayerNode.menuPortraitImage)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(height: 178)
-                .shadow(color: .black.opacity(0.48), radius: 14, y: 10)
+    private var bestRankColor: Color {
+        switch bestRankLetter {
+        case "S": return GameTheme.gold
+        case "A": return GameTheme.mint
+        case "B": return GameTheme.cyan
+        case "C": return GameTheme.coral
+        default: return .white.opacity(0.72)
         }
     }
 }
 
-private struct TrainingRule: View {
-    let icon: String
-    let text: String
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(GameTheme.cyan)
-            Text(text)
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.72))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+private struct HomePressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .brightness(configuration.isPressed ? -0.06 : 0)
+            .animation(.easeOut(duration: 0.11), value: configuration.isPressed)
     }
 }
 
-#Preview("Landscape") {
+#Preview("Landscape Japanese") {
     HomeView(bestSurvivalTime: 41.7, bestDodgedCount: 93, onStart: {})
         .frame(width: 932, height: 430)
-}
-
-#Preview("Portrait") {
-    HomeView(bestSurvivalTime: 41.7, bestDodgedCount: 93, onStart: {})
 }

@@ -21,9 +21,9 @@ struct GameView: View {
                     .background(Color.black)
 
                 if !hideHUD {
-                    compactHUD
-                        .padding(.top, geometry.safeAreaInsets.top + 8)
-                        .padding(.trailing, 10)
+                    survivalTimeHUD
+                        .padding(.top, geometry.safeAreaInsets.top + 10)
+                        .padding(.trailing, 12)
                 }
             }
             .onChange(of: scenePhase) { _, newPhase in
@@ -35,63 +35,61 @@ struct GameView: View {
         .statusBarHidden(true)
     }
 
-    private var compactHUD: some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            Button(action: { scene.setPaused(!scene.isGamePaused) }) {
-                Text(scene.isGamePaused ? "再開" : "停止")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.28))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .clipShape(Capsule())
-            }
-
-            VStack(alignment: .trailing, spacing: 4) {
-                hpMiniBar
-
-                HStack(spacing: 6) {
-                    MiniStat(text: String(format: "%.1fs", sessionStore.snapshot.survivalTime))
-                    MiniStat(text: "D \(sessionStore.snapshot.dodgedCount)")
-                    MiniStat(text: "H \(sessionStore.snapshot.hitCount)")
+    private var survivalTimeHUD: some View {
+        HStack(spacing: 10) {
+            Text(currentRankLetter)
+                .font(.system(size: 20, weight: .black, design: .serif))
+                .foregroundStyle(rankAccent)
+                .frame(width: 34, height: 34)
+                .background(.black.opacity(0.32), in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(rankAccent.opacity(0.88), lineWidth: 2)
                 }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .background(.black.opacity(0.16))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Capsule()
+                .fill(GameTheme.cyan)
+                .frame(width: 3, height: 24)
+
+            Text(L10n.format("format.seconds_short", sessionStore.snapshot.survivalTime))
+                .font(.system(size: 25, weight: .black, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .padding(.leading, 9)
+        .padding(.trailing, 13)
+        .padding(.vertical, 7)
+        .frame(minWidth: 138, alignment: .trailing)
+        .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.24), radius: 5, y: 2)
+        .allowsHitTesting(false)
+        .accessibilityLabel(
+            "\(L10n.format("accessibility.rank", currentRankLetter)), "
+                + L10n.format("format.seconds_short", sessionStore.snapshot.survivalTime)
+        )
+    }
+
+    private var currentRankLetter: String {
+        switch sessionStore.snapshot.survivalTime {
+        case 45...: "S"
+        case 35...: "A"
+        case 20...: "B"
+        default: "C"
         }
     }
 
-    private var hpMiniBar: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.black.opacity(0.22))
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.31, green: 0.84, blue: 0.54), Color(red: 0.13, green: 0.58, blue: 0.97)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: proxy.size.width * sessionStore.snapshot.hpRatio)
-            }
+    private var rankAccent: Color {
+        switch currentRankLetter {
+        case "S": GameTheme.gold
+        case "A": GameTheme.mint
+        case "B": GameTheme.cyan
+        default: GameTheme.coral
         }
-        .frame(width: 132, height: 8)
-    }
-}
-
-private struct MiniStat: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 10, weight: .bold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.82))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .background(.white.opacity(0.07))
-            .clipShape(Capsule())
     }
 }

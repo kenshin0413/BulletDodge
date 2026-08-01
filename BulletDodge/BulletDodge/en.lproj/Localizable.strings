@@ -1,0 +1,60 @@
+"app.title" = "SpikeDodge";
+"app.secondary_name" = "SURVIVAL DODGE";
+"brand.name" = "SpikeDodge";
+"brand.subtitle" = "SURVIVAL DODGE";
+"accessibility.brand" = "SpikeDodge";
+
+"home.arena_online" = "Arena online";
+"home.tagline" = "Master dodging curve shots.";
+"home.survival_training" = "Survival training";
+"home.solo" = "Solo";
+"home.mission_title" = "Read the bullet storm";
+"home.mission_description" = "Read each projectile and stay in the arena as long as you can.";
+"home.rule_move" = "Keep moving";
+"home.rule_aim" = "Read the aim";
+"home.rule_react" = "React fast";
+"home.start" = "Play Now";
+"home.start_hint" = "Start SpikeDodge";
+
+"update.title" = "Update Available";
+"update.message" = "Version %@ is available. Would you like to update now?";
+"update.later" = "Later";
+"update.action" = "Update";
+
+"game.pause" = "Pause";
+"game.resume" = "Resume";
+"game.dodged_short" = "D %d";
+"game.hits_short" = "H %d";
+"game.enemy_ammo" = "ENEMY AMMO %d/%d";
+
+"result.training_complete" = "Run Complete";
+"result.survival_time" = "SURVIVAL TIME";
+"result.seconds" = "SECONDS";
+"result.summary" = "RUN SUMMARY";
+"result.summary_description" = "Results from this training run";
+"result.avoidance_rate" = "%d%% DODGED";
+"result.retry" = "Try Again";
+"result.home" = "Home";
+
+"stats.best_time" = "BEST TIME";
+"stats.best_short" = "BEST";
+"stats.best_rank" = "BEST RANK";
+"stats.best_dodge" = "BEST DODGE";
+"stats.dodged" = "DODGED";
+"stats.hits" = "HITS";
+"stats.avoidance_rate" = "DODGE RATE";
+"stats.rank" = "RANK";
+"stats.new" = "NEW";
+
+"rank.s.headline" = "Untouchable";
+"rank.s.message" = "You read the entire bullet storm. Now push for a new personal best.";
+"rank.a.headline" = "Lightning reflexes";
+"rank.a.message" = "You saw the dangerous paths clearly. S rank is within reach.";
+"rank.b.headline" = "Nice moves";
+"rank.b.message" = "You found your dodging rhythm. Next time, keep a wider view.";
+"rank.c.headline" = "You can go further";
+"rank.c.message" = "Watch the enemy's wind-up to predict each path. Give it another shot.";
+
+"accessibility.rank" = "Rank %@";
+"format.seconds_short" = "%.1fs";
+"format.decimal_one" = "%.1f";

@@ -1,0 +1,60 @@
+"app.title" = "トゲ避け";
+"app.secondary_name" = "SpikeDodge";
+"brand.name" = "トゲ避け";
+"brand.subtitle" = "SpikeDodge";
+"accessibility.brand" = "トゲ避け";
+
+"home.arena_online" = "アリーナ オンライン";
+"home.tagline" = "カーブシュート避けをマスターしよう";
+"home.survival_training" = "サバイバルトレーニング";
+"home.solo" = "ソロ";
+"home.mission_title" = "弾幕を読み切れ";
+"home.mission_description" = "敵の投射を見極め、限界までアリーナに残ろう。";
+"home.rule_move" = "移動で回避";
+"home.rule_aim" = "照準を読む";
+"home.rule_react" = "反応を磨く";
+"home.start" = "今すぐ挑戦";
+"home.start_hint" = "トゲ避けを開始";
+
+"update.title" = "アップデートがあります";
+"update.message" = "バージョン%@を利用できます。最新版にアップデートしますか？";
+"update.later" = "あとで";
+"update.action" = "アップデート";
+
+"game.pause" = "停止";
+"game.resume" = "再開";
+"game.dodged_short" = "避 %d";
+"game.hits_short" = "被 %d";
+"game.enemy_ammo" = "敵の弾薬 %d/%d";
+
+"result.training_complete" = "挑戦終了";
+"result.survival_time" = "生存時間";
+"result.seconds" = "秒";
+"result.summary" = "ラン結果";
+"result.summary_description" = "今回のトレーニング結果";
+"result.avoidance_rate" = "回避率 %d%%";
+"result.retry" = "もう一度挑戦";
+"result.home" = "ホーム";
+
+"stats.best_time" = "ベストタイム";
+"stats.best_short" = "ベスト";
+"stats.best_rank" = "最高ランク";
+"stats.best_dodge" = "最多回避";
+"stats.dodged" = "回避";
+"stats.hits" = "被弾";
+"stats.avoidance_rate" = "回避率";
+"stats.rank" = "ランク";
+"stats.new" = "更新";
+
+"rank.s.headline" = "圧倒的な回避だ";
+"rank.s.message" = "弾幕の流れを完全に読み切った。次は自己ベストを更新しよう。";
+"rank.a.headline" = "鋭い反応だった";
+"rank.a.message" = "鋭い反応だった。次は自己ベストを狙おう。";
+"rank.b.headline" = "いい動きだ";
+"rank.b.message" = "回避のリズムができてきた。次は視野を広く保ってみよう。";
+"rank.c.headline" = "次はもっと行ける";
+"rank.c.message" = "敵の予備動作を見れば軌道を先読みできる。もう一度挑戦しよう。";
+
+"accessibility.rank" = "ランク %@";
+"format.seconds_short" = "%.1f秒";
+"format.decimal_one" = "%.1f";
