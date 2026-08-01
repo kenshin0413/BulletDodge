@@ -17,7 +17,7 @@ struct ArenaShellBackground: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                Image("arena_floor_v1")
+                Image("arena_map_v8")
                     .resizable()
                     .scaledToFill()
                     .frame(width: geometry.size.width, height: geometry.size.height)
@@ -102,18 +102,18 @@ struct AppMark: View {
             .shadow(color: GameTheme.coral.opacity(0.35), radius: 8)
 
             VStack(alignment: .leading, spacing: 0) {
-                Text("DODGE LAB")
+                Text(L10n.text("brand.name"))
                     .font(.system(size: 13, weight: .black, design: .rounded))
                     .tracking(1.5)
                     .foregroundStyle(.white)
-                Text("TACTICAL TRAINING")
+                Text(L10n.text("brand.subtitle"))
                     .font(.system(size: 7, weight: .bold, design: .rounded))
                     .tracking(1.2)
                     .foregroundStyle(GameTheme.cyan)
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Dodge Lab Tactical Training")
+        .accessibilityLabel(L10n.text("accessibility.brand"))
     }
 }
 

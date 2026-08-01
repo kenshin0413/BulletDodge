@@ -53,7 +53,12 @@ final class GameScene: SKScene {
     private let enemy = EnemyNode()
     private let joystick = VirtualJoystick()
     private let gameCamera = SKCameraNode()
-    private let ammoLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+    private let ammoIndicator = SKNode()
+    private let ammoBackdrop = SKShapeNode(
+        rectOf: CGSize(width: 48, height: 18),
+        cornerRadius: 9
+    )
+    private var ammoPips: [SKShapeNode] = []
     private let backgroundContainer = SKNode()
     private let explosionContainer = SKNode()
     private let hitFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -390,9 +395,9 @@ final class GameScene: SKScene {
         addChild(enemy)
         addChild(explosionContainer)
         addChild(gameCamera)
+        addChild(ammoIndicator)
         camera = gameCamera
         gameCamera.addChild(joystick)
-        gameCamera.addChild(ammoLabel)
 
         mapNode.fillColor = .clear
         mapNode.strokeColor = .clear
@@ -400,12 +405,7 @@ final class GameScene: SKScene {
         mapNode.addChild(backgroundContainer)
         buildMapBackground()
 
-        ammoLabel.fontSize = 12
-        ammoLabel.horizontalAlignmentMode = .right
-        ammoLabel.verticalAlignmentMode = .center
-        ammoLabel.fontColor = .white
-        ammoLabel.zPosition = 100
-        ammoLabel.isHidden = hideDebugHUD
+        configureAmmoIndicator()
         joystick.isHidden = autoWallCapture
 
         resetState()
@@ -540,57 +540,563 @@ final class GameScene: SKScene {
             y: -size.height / 2 + GameConfig.joystickBottomInset
         )
 
-        ammoLabel.position = CGPoint(
-            x: size.width / 2 - 16,
-            y: size.height / 2 - 68
-        )
     }
 
     private func buildMapBackground() {
         backgroundContainer.removeAllChildren()
 
-        if let backgroundImage = UIImage(named: "arena_floor_v1") {
-            let texture = SKTexture(image: backgroundImage)
+        if let mapImage = UIImage(named: "arena_map_v8") {
+            let texture = SKTexture(image: mapImage)
             texture.filteringMode = .linear
-
-            let floorSprite = SKSpriteNode(texture: texture, size: GameConfig.stageVisualSize)
-            floorSprite.position = .zero
-            floorSprite.zPosition = -20
-            backgroundContainer.addChild(floorSprite)
 
             let topExtensionHeight = GameConfig.tileSize * 16.0
             let bottomExtensionHeight = GameConfig.tileSize * 8.0
-            if let topSea = makeBackgroundSliceSprite(
-                from: texture,
-                imageSize: backgroundImage.size,
-                cropRectTopLeft: CGRect(x: 0, y: 0, width: backgroundImage.size.width, height: 96),
-                renderSize: CGSize(width: GameConfig.stageVisualSize.width, height: topExtensionHeight)
-            ) {
-                topSea.yScale = -1
-                topSea.position = CGPoint(x: 0, y: GameConfig.stageVisualSize.height / 2 + topExtensionHeight / 2)
-                topSea.zPosition = -21
-                backgroundContainer.addChild(topSea)
-            }
+            let totalHeight = GameConfig.stageVisualSize.height
+                + topExtensionHeight
+                + bottomExtensionHeight
+            let map = SKSpriteNode(
+                texture: texture,
+                size: CGSize(
+                    width: GameConfig.stageVisualSize.width,
+                    height: totalHeight
+                )
+            )
+            map.position = CGPoint(
+                x: 0,
+                y: (topExtensionHeight - bottomExtensionHeight) / 2
+            )
+            map.zPosition = -20
 
-            if let bottomSea = makeBackgroundSliceSprite(
-                from: texture,
-                imageSize: backgroundImage.size,
-                cropRectTopLeft: CGRect(x: 0, y: backgroundImage.size.height - 96, width: backgroundImage.size.width, height: 96),
-                renderSize: CGSize(width: GameConfig.stageVisualSize.width, height: bottomExtensionHeight)
-            ) {
-                bottomSea.yScale = -1
-                bottomSea.position = CGPoint(x: 0, y: -GameConfig.stageVisualSize.height / 2 - bottomExtensionHeight / 2)
-                bottomSea.zPosition = -21
-                backgroundContainer.addChild(bottomSea)
+            let sourceBottomEdge = Float(
+                GameConfig.stageBottomInset / GameConfig.stageVisualSize.height
+            )
+            let sourceTopEdge = Float(
+                (GameConfig.stageBottomInset + playableRect.height)
+                    / GameConfig.stageVisualSize.height
+            )
+            let destinationBottomEdge = Float(
+                (bottomExtensionHeight + GameConfig.stageBottomInset) / totalHeight
+            )
+            let destinationTopEdge = Float(
+                (bottomExtensionHeight + GameConfig.stageBottomInset + playableRect.height)
+                    / totalHeight
+            )
+
+            map.warpGeometry = SKWarpGeometryGrid(
+                columns: 1,
+                rows: 3,
+                sourcePositions: [
+                    SIMD2<Float>(0, 0),
+                    SIMD2<Float>(1, 0),
+                    SIMD2<Float>(0, sourceBottomEdge),
+                    SIMD2<Float>(1, sourceBottomEdge),
+                    SIMD2<Float>(0, sourceTopEdge),
+                    SIMD2<Float>(1, sourceTopEdge),
+                    SIMD2<Float>(0, 1),
+                    SIMD2<Float>(1, 1)
+                ],
+                destinationPositions: [
+                    SIMD2<Float>(0, 0),
+                    SIMD2<Float>(1, 0),
+                    SIMD2<Float>(0, destinationBottomEdge),
+                    SIMD2<Float>(1, destinationBottomEdge),
+                    SIMD2<Float>(0, destinationTopEdge),
+                    SIMD2<Float>(1, destinationTopEdge),
+                    SIMD2<Float>(0, 1),
+                    SIMD2<Float>(1, 1)
+                ]
+            )
+            backgroundContainer.addChild(map)
+        }
+    }
+
+    /// Clips the dedicated arena material to the exact movement polygon.
+    /// The artwork follows gameplay geometry; no movement constant is inferred
+    /// from the generated background.
+    private func makePlayableFloorLayer() -> SKNode {
+        let crop = SKCropNode()
+        crop.zPosition = -10
+
+        let bottomLeft = CGPoint(x: playableRect.minX, y: playableRect.minY)
+        let bottomRight = CGPoint(x: playableRect.maxX, y: playableRect.minY)
+        let topLeft = CGPoint(
+            x: playableRect.minX + GameConfig.playableUpperLeftWallInset,
+            y: playableRect.maxY
+        )
+        let topRight = CGPoint(
+            x: playableRect.maxX - GameConfig.playableUpperRightWallInset,
+            y: playableRect.maxY
+        )
+
+        let maskPath = CGMutablePath()
+        maskPath.move(to: bottomLeft)
+        maskPath.addLine(to: bottomRight)
+        maskPath.addLine(to: topRight)
+        maskPath.addLine(to: topLeft)
+        maskPath.closeSubpath()
+
+        let mask = SKShapeNode(path: maskPath)
+        mask.fillColor = .white
+        mask.strokeColor = .white
+        mask.lineWidth = 2
+        crop.maskNode = mask
+
+        if let floorImage = UIImage(named: "arena_playable_floor") {
+            let texture = SKTexture(image: floorImage)
+            texture.filteringMode = .linear
+            let floor = SKSpriteNode(texture: texture, size: GameConfig.stageVisualSize)
+            floor.position = .zero
+            floor.warpGeometry = SKWarpGeometryGrid(
+                columns: 1,
+                rows: 1,
+                sourcePositions: [
+                    SIMD2<Float>(0, 0),
+                    SIMD2<Float>(1, 0),
+                    SIMD2<Float>(0, 1),
+                    SIMD2<Float>(1, 1)
+                ],
+                destinationPositions: [
+                    SIMD2<Float>(0, 0),
+                    SIMD2<Float>(1, 0),
+                    SIMD2<Float>(0.04, 1),
+                    SIMD2<Float>(0.96, 1)
+                ]
+            )
+            crop.addChild(floor)
+            crop.addChild(makeFloorNavigationPattern())
+        } else {
+            let fallback = SKShapeNode(path: maskPath)
+            fallback.fillColor = UIColor(red: 0.54, green: 0.66, blue: 0.71, alpha: 1)
+            fallback.strokeColor = .clear
+            crop.addChild(fallback)
+            crop.addChild(makeFloorNavigationPattern())
+        }
+
+        return crop
+    }
+
+    /// Repeated inlays provide stable distance cues while moving without
+    /// participating in physics or changing the calibrated arena dimensions.
+    private func makeFloorNavigationPattern() -> SKNode {
+        let container = SKNode()
+        container.zPosition = 2
+
+        let spacing = GameConfig.tileSize * 3
+        let lineColor = UIColor(red: 0.12, green: 0.34, blue: 0.40, alpha: 0.20)
+        let accentColor = UIColor(red: 0.68, green: 0.38, blue: 0.20, alpha: 0.52)
+        let bottomLeft = CGPoint(x: playableRect.minX, y: playableRect.minY)
+        let bottomRight = CGPoint(x: playableRect.maxX, y: playableRect.minY)
+        let topLeft = CGPoint(
+            x: playableRect.minX + GameConfig.playableUpperLeftWallInset,
+            y: playableRect.maxY
+        )
+        let topRight = CGPoint(
+            x: playableRect.maxX - GameConfig.playableUpperRightWallInset,
+            y: playableRect.maxY
+        )
+        let columnCount = max(2, Int(round(playableRect.width / spacing)))
+        let rowCount = max(2, Int(round(playableRect.height / spacing)))
+
+        let gridPath = CGMutablePath()
+        for column in 1..<columnCount {
+            let fraction = CGFloat(column) / CGFloat(columnCount)
+            gridPath.move(to: CGPoint(
+                x: bottomLeft.x + (bottomRight.x - bottomLeft.x) * fraction,
+                y: bottomLeft.y
+            ))
+            gridPath.addLine(to: CGPoint(
+                x: topLeft.x + (topRight.x - topLeft.x) * fraction,
+                y: topLeft.y
+            ))
+        }
+
+        for row in 1..<rowCount {
+            let depth = CGFloat(row) / CGFloat(rowCount)
+            let rowY = bottomLeft.y + (topLeft.y - bottomLeft.y) * depth
+            let rowLeft = bottomLeft.x + (topLeft.x - bottomLeft.x) * depth
+            let rowRight = bottomRight.x + (topRight.x - bottomRight.x) * depth
+            gridPath.move(to: CGPoint(x: rowLeft, y: rowY))
+            gridPath.addLine(to: CGPoint(x: rowRight, y: rowY))
+        }
+
+        let grid = SKShapeNode(path: gridPath)
+        grid.strokeColor = lineColor
+        grid.lineWidth = 1.15
+        grid.zPosition = 0
+        container.addChild(grid)
+
+        for row in 1..<rowCount {
+            let depth = CGFloat(row) / CGFloat(rowCount)
+            let markerY = bottomLeft.y + (topLeft.y - bottomLeft.y) * depth
+            let rowLeft = bottomLeft.x + (topLeft.x - bottomLeft.x) * depth
+            let rowRight = bottomRight.x + (topRight.x - bottomRight.x) * depth
+
+            for column in 1..<columnCount {
+                let fraction = CGFloat(column) / CGFloat(columnCount)
+                let markerX = rowLeft + (rowRight - rowLeft) * fraction
+                let markerIsLarge = (row + column).isMultiple(of: 2)
+                let marker = SKShapeNode(
+                    rectOf: CGSize(
+                        width: markerIsLarge ? 7 : 5,
+                        height: markerIsLarge ? 4.8 : 3.4
+                    ),
+                    cornerRadius: 1
+                )
+                marker.position = CGPoint(x: markerX, y: markerY)
+                marker.zRotation = .pi / 4
+                marker.fillColor = (row + column).isMultiple(of: 3)
+                    ? accentColor
+                    : UIColor(red: 0.18, green: 0.67, blue: 0.70, alpha: 0.46)
+                marker.strokeColor = UIColor.white.withAlphaComponent(0.16)
+                marker.lineWidth = 0.7
+                marker.zPosition = 1
+                container.addChild(marker)
             }
         }
 
-        let vignette = SKShapeNode(rectOf: GameConfig.stageVisualSize)
-        vignette.fillColor = UIColor(red: 0.20, green: 0.05, blue: 0.17, alpha: 0.12)
-        vignette.strokeColor = .clear
-        vignette.zPosition = -3.5
-        backgroundContainer.addChild(vignette)
+        return container
+    }
 
+    /// Adds a purely visual boundary on the exact arena polygon used by movement.
+    /// No collision values are duplicated here: the path is derived from
+    /// `playableRect` and the existing far-wall taper.
+    private func makePlayableBoundaryLayer() -> SKNode {
+        let container = SKNode()
+        container.zPosition = -3.15
+
+        let bottomLeft = CGPoint(x: playableRect.minX, y: playableRect.minY)
+        let bottomRight = CGPoint(x: playableRect.maxX, y: playableRect.minY)
+        let topLeft = CGPoint(
+            x: playableRect.minX + GameConfig.playableUpperLeftWallInset,
+            y: playableRect.maxY
+        )
+        let topRight = CGPoint(
+            x: playableRect.maxX - GameConfig.playableUpperRightWallInset,
+            y: playableRect.maxY
+        )
+
+        let boundaryPath = CGMutablePath()
+        boundaryPath.move(to: bottomLeft)
+        boundaryPath.addLine(to: topLeft)
+        boundaryPath.move(to: bottomRight)
+        boundaryPath.addLine(to: topRight)
+
+        // A shallow foundation lip remains on the same ground plane as the
+        // arena. Its downward shadow gives height without making the perimeter
+        // look like a lower platform.
+        let dropShadow = SKShapeNode(path: boundaryPath)
+        dropShadow.position = CGPoint(x: 0, y: -1.5)
+        dropShadow.strokeColor = UIColor(red: 0.15, green: 0.13, blue: 0.08, alpha: 0.42)
+        dropShadow.lineWidth = 4.5
+        dropShadow.lineJoin = .round
+        dropShadow.fillColor = .clear
+        dropShadow.zPosition = 1
+        container.addChild(dropShadow)
+
+        let curb = SKShapeNode(path: boundaryPath)
+        curb.strokeColor = UIColor(red: 0.78, green: 0.76, blue: 0.61, alpha: 0.94)
+        curb.lineWidth = 3.4
+        curb.lineJoin = .round
+        curb.fillColor = .clear
+        curb.zPosition = 2
+        container.addChild(curb)
+
+        let mineralBand = SKShapeNode(path: boundaryPath)
+        mineralBand.strokeColor = UIColor(red: 0.57, green: 0.40, blue: 0.16, alpha: 0.88)
+        mineralBand.lineWidth = 1.25
+        mineralBand.lineJoin = .round
+        mineralBand.fillColor = .clear
+        mineralBand.zPosition = 3
+        container.addChild(mineralBand)
+        return container
+    }
+
+    private func makeFilledPolygon(_ points: [CGPoint], color: UIColor) -> SKShapeNode {
+        let path = CGMutablePath()
+        guard let first = points.first else {
+            return SKShapeNode()
+        }
+
+        path.move(to: first)
+        points.dropFirst().forEach { path.addLine(to: $0) }
+        path.closeSubpath()
+
+        let shape = SKShapeNode(path: path)
+        shape.fillColor = color
+        shape.strokeColor = .clear
+        return shape
+    }
+
+    private func addBoundarySignalTiles(
+        to container: SKNode,
+        bottomLeft: CGPoint,
+        bottomRight: CGPoint,
+        topLeft: CGPoint,
+        topRight: CGPoint
+    ) {
+        func addTile(at point: CGPoint, rotation: CGFloat, index: Int) {
+            let tile = SKShapeNode(
+                rectOf: CGSize(width: index.isMultiple(of: 2) ? 9 : 6.5, height: 3.4),
+                cornerRadius: 1.4
+            )
+            tile.position = point
+            tile.zRotation = rotation
+            tile.fillColor = index.isMultiple(of: 3)
+                ? UIColor(red: 1.0, green: 0.70, blue: 0.28, alpha: 0.98)
+                : UIColor(red: 0.30, green: 0.96, blue: 0.92, alpha: 0.98)
+            tile.strokeColor = UIColor.white.withAlphaComponent(0.28)
+            tile.lineWidth = 0.8
+            tile.glowWidth = 0.9
+            tile.zPosition = 5
+            let delay = SKAction.wait(forDuration: TimeInterval(index % 5) * 0.12)
+            tile.run(.repeatForever(.sequence([
+                delay,
+                .fadeAlpha(to: 0.48, duration: 0.48),
+                .fadeAlpha(to: 1.0, duration: 0.48)
+            ])))
+            container.addChild(tile)
+        }
+
+        let sideCount = 13
+        for index in 1..<sideCount {
+            let t = CGFloat(index) / CGFloat(sideCount)
+            let left = CGPoint(
+                x: bottomLeft.x + (topLeft.x - bottomLeft.x) * t,
+                y: bottomLeft.y + (topLeft.y - bottomLeft.y) * t
+            )
+            let right = CGPoint(
+                x: bottomRight.x + (topRight.x - bottomRight.x) * t,
+                y: bottomRight.y + (topRight.y - bottomRight.y) * t
+            )
+            let leftAngle = atan2(topLeft.y - bottomLeft.y, topLeft.x - bottomLeft.x)
+            let rightAngle = atan2(topRight.y - bottomRight.y, topRight.x - bottomRight.x)
+            addTile(at: CGPoint(x: left.x - 7, y: left.y), rotation: leftAngle, index: index)
+            addTile(at: CGPoint(x: right.x + 7, y: right.y), rotation: rightAngle, index: index + 1)
+        }
+
+        let horizontalCount = 10
+        for index in 1..<horizontalCount {
+            let t = CGFloat(index) / CGFloat(horizontalCount)
+            addTile(
+                at: CGPoint(
+                    x: bottomLeft.x + (bottomRight.x - bottomLeft.x) * t,
+                    y: bottomLeft.y - 7
+                ),
+                rotation: 0,
+                index: index + 20
+            )
+            addTile(
+                at: CGPoint(
+                    x: topLeft.x + (topRight.x - topLeft.x) * t,
+                    y: topLeft.y + 7
+                ),
+                rotation: 0,
+                index: index + 31
+            )
+        }
+    }
+
+    /// Original perimeter machinery built from layered SpriteKit geometry.
+    /// Rotors, pistons and cores move independently to give the non-playable
+    /// edge depth and life while remaining completely outside gameplay.
+    private func makeKineticPerimeterDecor() -> SKNode {
+        let container = SKNode()
+        container.zPosition = -2.75
+
+        let sideYPositions = [
+            playableRect.minY + playableRect.height * 0.17,
+            playableRect.minY + playableRect.height * 0.50,
+            playableRect.minY + playableRect.height * 0.83
+        ]
+        for (index, y) in sideYPositions.enumerated() {
+            let leftTower = makeTideEngine(onLeft: true, index: index)
+            leftTower.position = CGPoint(x: stageRect.minX + 50, y: y)
+            container.addChild(leftTower)
+
+            let rightTower = makeTideEngine(onLeft: false, index: index)
+            rightTower.position = CGPoint(x: stageRect.maxX - 50, y: y)
+            container.addChild(rightTower)
+        }
+
+        let pylonXPositions: [CGFloat] = [-0.31, -0.155, 0, 0.155, 0.31]
+        for (index, ratio) in pylonXPositions.enumerated() {
+            let lowerPylon = makeFluxPylon(index: index, pointsUp: true)
+            lowerPylon.position = CGPoint(
+                x: playableRect.midX + playableRect.width * ratio,
+                y: playableRect.minY - 64
+            )
+            container.addChild(lowerPylon)
+
+            if index.isMultiple(of: 2) {
+                let upperPylon = makeFluxPylon(index: index + 7, pointsUp: false)
+                upperPylon.position = CGPoint(
+                    x: playableRect.midX + playableRect.width * ratio,
+                    y: playableRect.maxY + 45
+                )
+                container.addChild(upperPylon)
+            }
+        }
+
+        return container
+    }
+
+    private func makeTideEngine(onLeft: Bool, index: Int) -> SKNode {
+        let node = SKNode()
+        let facing: CGFloat = onLeft ? 1 : -1
+
+        let groundShadow = SKShapeNode(ellipseOf: CGSize(width: 82, height: 36))
+        groundShadow.position = CGPoint(x: -facing * 5, y: -8)
+        groundShadow.fillColor = UIColor.black.withAlphaComponent(0.32)
+        groundShadow.strokeColor = .clear
+        node.addChild(groundShadow)
+
+        let rearHousing = SKShapeNode(circleOfRadius: 40)
+        rearHousing.position = CGPoint(x: -facing * 4, y: 3)
+        rearHousing.fillColor = UIColor(red: 0.035, green: 0.09, blue: 0.14, alpha: 1)
+        rearHousing.strokeColor = UIColor(red: 0.33, green: 0.18, blue: 0.11, alpha: 1)
+        rearHousing.lineWidth = 7
+        node.addChild(rearHousing)
+
+        let copperRing = SKShapeNode(circleOfRadius: 33)
+        copperRing.position = rearHousing.position
+        copperRing.fillColor = UIColor(red: 0.04, green: 0.14, blue: 0.20, alpha: 1)
+        copperRing.strokeColor = UIColor(red: 0.68, green: 0.36, blue: 0.19, alpha: 1)
+        copperRing.lineWidth = 5
+        node.addChild(copperRing)
+
+        let innerRim = SKShapeNode(circleOfRadius: 26)
+        innerRim.position = rearHousing.position
+        innerRim.fillColor = UIColor(red: 0.025, green: 0.10, blue: 0.15, alpha: 1)
+        innerRim.strokeColor = UIColor(red: 0.18, green: 0.54, blue: 0.59, alpha: 0.9)
+        innerRim.lineWidth = 2
+        node.addChild(innerRim)
+
+        let rotor = SKNode()
+        rotor.position = rearHousing.position
+        rotor.zPosition = 3
+        for bladeIndex in 0..<5 {
+            let bladePath = CGMutablePath()
+            bladePath.move(to: CGPoint(x: -3.5, y: 4))
+            bladePath.addCurve(
+                to: CGPoint(x: 2, y: 23),
+                control1: CGPoint(x: -10, y: 12),
+                control2: CGPoint(x: -8, y: 22)
+            )
+            bladePath.addCurve(
+                to: CGPoint(x: 4.5, y: 5),
+                control1: CGPoint(x: 10, y: 20),
+                control2: CGPoint(x: 9, y: 10)
+            )
+            bladePath.closeSubpath()
+            let blade = SKShapeNode(path: bladePath)
+            blade.zRotation = CGFloat(bladeIndex) * (.pi * 2 / 5)
+            blade.fillColor = UIColor(red: 0.20, green: 0.68, blue: 0.72, alpha: 0.96)
+            blade.strokeColor = UIColor(red: 0.50, green: 0.90, blue: 0.88, alpha: 0.34)
+            blade.lineWidth = 0.8
+            rotor.addChild(blade)
+        }
+        let rotorDirection: CGFloat = onLeft ? 1 : -1
+        rotor.run(.repeatForever(.rotate(
+            byAngle: rotorDirection * .pi * 2,
+            duration: 3.2 + Double(index) * 0.45
+        )))
+        node.addChild(rotor)
+
+        let hubShadow = SKShapeNode(circleOfRadius: 9)
+        hubShadow.position = CGPoint(x: rotor.position.x + 1.5, y: rotor.position.y - 2)
+        hubShadow.zPosition = 3.5
+        hubShadow.fillColor = UIColor.black.withAlphaComponent(0.44)
+        hubShadow.strokeColor = .clear
+        node.addChild(hubShadow)
+
+        let core = SKShapeNode(circleOfRadius: 7)
+        core.position = rotor.position
+        core.zPosition = 4
+        core.fillColor = UIColor(red: 0.46, green: 0.95, blue: 0.92, alpha: 1)
+        core.strokeColor = UIColor(red: 0.83, green: 0.48, blue: 0.24, alpha: 1)
+        core.lineWidth = 2
+        core.glowWidth = 3
+        core.run(.repeatForever(.sequence([
+            .scale(to: 1.13, duration: 0.8),
+            .scale(to: 0.92, duration: 0.8)
+        ])))
+        node.addChild(core)
+
+        let pressureLight = SKShapeNode(circleOfRadius: 3.5)
+        pressureLight.position = CGPoint(x: facing * 31, y: 17)
+        pressureLight.zPosition = 5
+        pressureLight.fillColor = UIColor(red: 1.0, green: 0.55, blue: 0.26, alpha: 1)
+        pressureLight.strokeColor = .clear
+        pressureLight.glowWidth = 2
+        pressureLight.run(.repeatForever(.sequence([
+            .fadeAlpha(to: 0.28, duration: 0.45 + Double(index) * 0.08),
+            .fadeAlpha(to: 1.0, duration: 0.45 + Double(index) * 0.08)
+        ])))
+        node.addChild(pressureLight)
+
+        node.run(.repeatForever(.sequence([
+            .moveBy(x: 0, y: 2, duration: 1.6 + Double(index) * 0.12),
+            .moveBy(x: 0, y: -2, duration: 1.6 + Double(index) * 0.12)
+        ])))
+        return node
+    }
+
+    private func makeFluxPylon(index: Int, pointsUp: Bool) -> SKNode {
+        let node = SKNode()
+        let orientation: CGFloat = pointsUp ? 1 : -1
+
+        let shadow = SKShapeNode(ellipseOf: CGSize(width: 50, height: 16))
+        shadow.position = CGPoint(x: 0, y: -orientation * 20)
+        shadow.fillColor = UIColor.black.withAlphaComponent(0.34)
+        shadow.strokeColor = .clear
+        node.addChild(shadow)
+
+        let base = SKShapeNode(rectOf: CGSize(width: 42, height: 36), cornerRadius: 11)
+        base.fillColor = UIColor(red: 0.08, green: 0.20, blue: 0.29, alpha: 0.98)
+        base.strokeColor = UIColor(red: 0.30, green: 0.76, blue: 0.76, alpha: 0.94)
+        base.lineWidth = 3
+        node.addChild(base)
+
+        let mast = SKShapeNode(rectOf: CGSize(width: 10, height: 48), cornerRadius: 5)
+        mast.position = CGPoint(x: 0, y: orientation * 31)
+        mast.fillColor = UIColor(red: 0.70, green: 0.48, blue: 0.24, alpha: 1)
+        mast.strokeColor = UIColor(red: 0.22, green: 0.18, blue: 0.25, alpha: 1)
+        mast.lineWidth = 2
+        node.addChild(mast)
+
+        let orbit = SKNode()
+        orbit.position = CGPoint(x: 0, y: orientation * 56)
+        for dotIndex in 0..<3 {
+            let dot = SKShapeNode(circleOfRadius: dotIndex == 0 ? 5 : 3.5)
+            dot.position = CGPoint(x: 16, y: 0)
+            dot.zRotation = CGFloat(dotIndex) * (.pi * 2 / 3)
+            let carrier = SKNode()
+            carrier.zRotation = CGFloat(dotIndex) * (.pi * 2 / 3)
+            carrier.addChild(dot)
+            dot.fillColor = dotIndex == 0
+                ? UIColor(red: 1.0, green: 0.65, blue: 0.25, alpha: 1)
+                : UIColor(red: 0.29, green: 0.96, blue: 0.92, alpha: 1)
+            dot.strokeColor = .clear
+            dot.glowWidth = 2.5
+            orbit.addChild(carrier)
+        }
+        orbit.run(.repeatForever(.rotate(
+            byAngle: (index.isMultiple(of: 2) ? 1 : -1) * .pi * 2,
+            duration: 2.8 + Double(index % 3) * 0.35
+        )))
+        node.addChild(orbit)
+
+        let pulse = SKShapeNode(circleOfRadius: 5.5)
+        pulse.position = orbit.position
+        pulse.fillColor = UIColor(red: 0.87, green: 1.0, blue: 0.74, alpha: 1)
+        pulse.strokeColor = .clear
+        pulse.glowWidth = 4
+        pulse.run(.repeatForever(.sequence([
+            .fadeAlpha(to: 0.42, duration: 0.55),
+            .fadeAlpha(to: 1.0, duration: 0.55)
+        ])))
+        node.addChild(pulse)
+        return node
     }
 
     private func makeBackgroundSliceSprite(
@@ -1469,10 +1975,9 @@ final class GameScene: SKScene {
     }
 
     private func spawnExplosionEffect(at position: CGPoint) {
-        let burstDiameter = GameConfig.explosionRadius * 2.15
         let burst = SKSpriteNode(
             texture: BulletNode.burstTexture,
-            size: CGSize(width: burstDiameter, height: burstDiameter)
+            size: GameConfig.attackBurstSpriteSize
         )
         burst.position = position
         burst.zPosition = 26
@@ -1481,14 +1986,15 @@ final class GameScene: SKScene {
         addChild(burst)
 
         let appear = SKAction.group([
-            .scale(to: 0.92, duration: 0.016),
-            .fadeAlpha(to: 0.92, duration: 0.016)
+            .scale(to: 1.0, duration: GameConfig.attackBurstAppearDuration),
+            .fadeAlpha(to: 0.92, duration: GameConfig.attackBurstAppearDuration)
         ])
+        let hold = SKAction.wait(forDuration: GameConfig.attackBurstHoldDuration)
         let disappear = SKAction.group([
-            .scale(to: 1.10, duration: 0.052),
-            .fadeOut(withDuration: 0.052)
+            .scale(to: 1.10, duration: GameConfig.attackBurstFadeDuration),
+            .fadeOut(withDuration: GameConfig.attackBurstFadeDuration)
         ])
-        burst.run(.sequence([appear, disappear, .removeFromParent()]))
+        burst.run(.sequence([appear, hold, disappear, .removeFromParent()]))
     }
 
     private func playHitFeedback() {
@@ -1513,9 +2019,41 @@ final class GameScene: SKScene {
         return path.cgPath
     }
 
+    private func configureAmmoIndicator() {
+        ammoIndicator.zPosition = 120
+        ammoIndicator.isHidden = hideDebugHUD
+
+        ammoBackdrop.fillColor = UIColor(white: 0.04, alpha: 0.76)
+        ammoBackdrop.strokeColor = UIColor(red: 0.80, green: 0.61, blue: 0.25, alpha: 0.72)
+        ammoBackdrop.lineWidth = 0.8
+        ammoIndicator.addChild(ammoBackdrop)
+
+        ammoPips = (0..<GameConfig.maxAmmo).map { index in
+            let pip = SKShapeNode(circleOfRadius: 3.6)
+            pip.position = CGPoint(x: CGFloat(index - 1) * 12, y: 0)
+            pip.lineWidth = 0.8
+            ammoIndicator.addChild(pip)
+            return pip
+        }
+    }
+
     private func updateAmmoLabel() {
         guard !hideDebugHUD else { return }
-        ammoLabel.text = "ENEMY AMMO \(enemy.ammo)/\(GameConfig.maxAmmo)"
+
+        ammoIndicator.position = CGPoint(
+            x: enemy.position.x,
+            y: enemy.position.y + GameConfig.enemyCollisionRadius + 25
+        )
+
+        for (index, pip) in ammoPips.enumerated() {
+            let isLoaded = index < enemy.ammo
+            pip.fillColor = isLoaded
+                ? UIColor(red: 0.98, green: 0.31, blue: 0.39, alpha: 1)
+                : UIColor(white: 0.90, alpha: 0.15)
+            pip.strokeColor = isLoaded
+                ? UIColor(red: 1.00, green: 0.63, blue: 0.46, alpha: 0.95)
+                : UIColor(white: 0.94, alpha: 0.38)
+        }
     }
 
     private func publishSnapshot() {

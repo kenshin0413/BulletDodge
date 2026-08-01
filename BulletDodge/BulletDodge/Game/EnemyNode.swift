@@ -56,6 +56,8 @@ final class EnemyNode: SKNode {
     private var movementVelocity: CGVector = .zero
     private var movementMode: MovementMode = .orbiting
     private var currentPlayerDistance: CGFloat = .greatestFiniteMagnitude
+    private var currentAttackPositionDistance =
+        GameConfig.enemyThornAttackPositionDistance
     private var isWallRecoveryActive = false
     private var isArenaEdgePressureActive = false
     private var hasReachedWallRecoveryPosition = false
@@ -176,6 +178,12 @@ final class EnemyNode: SKNode {
             dy: position.y - playerPosition.y
         )
         currentPlayerDistance = fromPlayer.length
+        let projectileDirection = CGVector(
+            dx: -fromPlayer.dx,
+            dy: -fromPlayer.dy
+        )
+        currentAttackPositionDistance =
+            GameConfig.enemyThornAttackPositionDistance(for: projectileDirection)
         if movementMode == .retreating,
            currentPlayerDistance >= GameConfig.enemyRetreatCompletionDistance {
             finishRetreat()
@@ -240,11 +248,19 @@ final class EnemyNode: SKNode {
                 dx: mapSafeRect.midX - playerPosition.x,
                 dy: mapSafeRect.midY - playerPosition.y
             ).normalized
+            let projectileDirection = CGVector(
+                dx: -towardArenaInterior.dx,
+                dy: -towardArenaInterior.dy
+            )
             targetPoint = CGPoint(
                 x: playerPosition.x
-                    + towardArenaInterior.dx * GameConfig.enemyThornAttackPositionDistance,
+                    + towardArenaInterior.dx * GameConfig.enemyThornAttackPositionDistance(
+                        for: projectileDirection
+                    ),
                 y: playerPosition.y
-                    + towardArenaInterior.dy * GameConfig.enemyThornAttackPositionDistance
+                    + towardArenaInterior.dy * GameConfig.enemyThornAttackPositionDistance(
+                        for: projectileDirection
+                    )
             ).clamped(in: mapSafeRect)
             if isWallRecoveryActive {
                 let recoveryDistance = CGPoint.distance(from: position, to: targetPoint)
@@ -269,14 +285,14 @@ final class EnemyNode: SKNode {
         // its curved thorn can cover, close the gap at normal player speed.
         // Projectile range and fuse remain unchanged.
         if !isArenaEdgePressureActive,
-           currentPlayerDistance > GameConfig.enemyThornAttackPositionDistance
+           currentPlayerDistance > currentAttackPositionDistance
                 + GameConfig.enemyThornAttackDistanceTolerance {
             let attackDirection = fromPlayer.normalized
             targetPoint = CGPoint(
                 x: playerPosition.x
-                    + attackDirection.dx * GameConfig.enemyThornAttackPositionDistance,
+                    + attackDirection.dx * currentAttackPositionDistance,
                 y: playerPosition.y
-                    + attackDirection.dy * GameConfig.enemyThornAttackPositionDistance
+                    + attackDirection.dy * currentAttackPositionDistance
             ).clamped(in: mapSafeRect)
         }
 
@@ -392,10 +408,10 @@ final class EnemyNode: SKNode {
             return .none
         }
         guard nextFireTimer <= 0, ammo > 0 else { return .none }
-        guard currentPlayerDistance <= GameConfig.enemyThornAttackPositionDistance
+        guard currentPlayerDistance <= currentAttackPositionDistance
             + GameConfig.enemyThornAttackDistanceTolerance else { return .none }
         if isArenaEdgePressureActive {
-            guard currentPlayerDistance >= GameConfig.enemyThornAttackPositionDistance
+            guard currentPlayerDistance >= currentAttackPositionDistance
                 - GameConfig.enemyThornAttackDistanceTolerance else { return .none }
         }
         if movementMode == .approaching,

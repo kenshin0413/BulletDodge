@@ -79,14 +79,16 @@ enum GameConfig {
     static let playerHealthBarYOffset: CGFloat = playerGroundIndicatorYOffset
         + 140 / referencePixelsPerWorldY
 
-    // A full near-wall traverse originally measured 8.3 s in the app and 8.0 s
-    // in the reference. The later matched handling captures provide the more
-    // reliable steady-state comparison: the app covered 230-240 px/s while the
-    // reference covered 207-216 px/s. Retain the traverse calibration, then
-    // apply the measured 0.90 correction for the final reference speed.
+    // The handling captures set the underlying steady-state calibration.
+    // In the latest matched wall-to-wall recordings, however, the app still
+    // takes 8.3 s for the reference's 8.0 s. Remove the shared first-frame
+    // pickup before taking the ratio so the complete traverse, rather than
+    // touch latency, is what the final correction matches.
     static let playerTraverseSpeedCorrection: CGFloat = (8.3 - 1.0 / 24.0)
         / (8.0 - 1.0 / 24.0)
     static let playerMeasuredSpeedCorrection: CGFloat = 0.90
+    static let playerFinalTraverseCorrection: CGFloat = (8.3 - 1.0 / 24.0)
+        / (8.0 - 1.0 / 24.0)
     static let playerSpeed: CGFloat = movementReferenceTileSize
         * (13 / 4.5)
         * (6.2 / 7.8)
@@ -94,6 +96,7 @@ enum GameConfig {
         * (7.3 / 8.0)
         * playerTraverseSpeedCorrection
         * playerMeasuredSpeedCorrection
+        * playerFinalTraverseCorrection
         * autoWallTestSpeedMultiplier
     // The matched 180-degree captures reach zero in roughly 6-8 frames and
     // settle at full opposite speed in 12-15 frames. A 9x linear acceleration
@@ -203,37 +206,91 @@ enum GameConfig {
     static let enemyLargeAimOffsetRange: ClosedRange<CGFloat> = (tileSize * 1.75)...(tileSize * 2.75)
     static let autoAttackInitialFireDelay: TimeInterval = 1.60
     static let autoAttackRepeatFireDelay: TimeInterval = 99.0
-    // Brawl Stars reference: the parent projectile travels 2.6 cm in 1.1 seconds.
-    // The target device renders at 460 native pixels per inch and 3 pixels per point.
+    // The target device renders at 460 native pixels per inch and 3 pixels per
+    // point. The reference projectile's on-screen distance is direction
+    // dependent: about 2.6 cm toward the camera and 3.5 cm horizontally.
+    // These 16 samples are the left/right-symmetric fit of the 60 fps
+    // half-circle capture, starting at screen-right and advancing CCW.
     static let targetNativePixelsPerInch: CGFloat = 460
     static let targetNativePixelsPerPoint: CGFloat = 3
     static let targetPointsPerMillimeter: CGFloat = targetNativePixelsPerInch
         / targetNativePixelsPerPoint
         / 25.4
     static let thornBallTravelCentimeters: CGFloat = 2.6
-    static let thornBallVisualDiameter: CGFloat = 4.8 * targetPointsPerMillimeter
-    static let thornBallLifetime: TimeInterval = 1.1
+    static let thornBallDirectionStepRadians = CGFloat.pi / 8
+    static let thornBallTravelCentimetersByScreenDirection: [CGFloat] = [
+        3.50, 3.40, 3.00, 3.20,
+        3.50, 3.20, 3.00, 3.40,
+        3.50, 3.40, 3.00, 2.70,
+        2.60, 2.70, 3.00, 3.40
+    ]
+    static let thornBallVisualDiameterMillimeters: CGFloat = 4.0
+    static let thornBallVisualDiameter: CGFloat =
+        thornBallVisualDiameterMillimeters * targetPointsPerMillimeter
+    static let thornBallVisibleNativeDiameter: CGFloat =
+        thornBallVisualDiameterMillimeters * referencePixelsPerMillimeter
+    static let thornBallTextureVisibleWidthRatio: CGFloat = 0.7097
+    static let thornBallTextureVisibleHeightRatio: CGFloat = 0.6922
+    // X/Y use separate world sizes so the projected opaque bounds are a true
+    // 4.0 x 4.0 mm circle rather than inheriting the scene's anisotropic scale.
+    static let thornBallSpriteSize = CGSize(
+        width: thornBallVisibleNativeDiameter
+            / referencePixelsPerWorldX
+            / thornBallTextureVisibleWidthRatio,
+        height: thornBallVisibleNativeDiameter
+            / referencePixelsPerWorldY
+            / thornBallTextureVisibleHeightRatio
+    )
+    static let thornBallLifetime: TimeInterval = 1.0
     static let thornBallRange: CGFloat = thornBallTravelCentimeters
         * (targetNativePixelsPerInch / targetNativePixelsPerPoint)
         / 2.54
     static let thornBallSpeed: CGFloat = thornBallRange / CGFloat(thornBallLifetime)
     static let thornBallDamage: CGFloat = 12
     static let thornBallRadius: CGFloat = 22
-    static let thornBallContactRadius: CGFloat = thornBallVisualDiameter * 0.5
+    // Keep the independently calibrated collision core unchanged when tuning
+    // the artwork's visible size.
+    static let thornBallContactRadius: CGFloat =
+        4.8 * targetPointsPerMillimeter * 0.5
     static let thornBallSpawnInset: CGFloat = 12
     static let thornBallTargetLeadFactor: CGFloat = 0.14
     static let explosionRadius: CGFloat = 20
     static let explosionDamage: CGFloat = 15
+    // Across the clean single-shot reference, the burst grows for four frames,
+    // holds its maximum for four, and disappears on the ninth. Its maximum
+    // opaque bounds measure 15.2 x 14.1 mm on the reference device.
+    static let attackBurstVisibleWidthMillimeters: CGFloat = 15.2
+    static let attackBurstVisibleHeightMillimeters: CGFloat = 14.1
+    static let attackBurstVisibleNativeWidth: CGFloat =
+        attackBurstVisibleWidthMillimeters * targetNativePixelsPerInch / 25.4
+    static let attackBurstVisibleNativeHeight: CGFloat =
+        attackBurstVisibleHeightMillimeters * targetNativePixelsPerInch / 25.4
+    static let attackBurstTextureVisibleWidthRatio: CGFloat = 254.0 / 512.0
+    static let attackBurstTextureVisibleHeightRatio: CGFloat = 229.0 / 512.0
+    static let attackBurstSpriteSize = CGSize(
+        width: attackBurstVisibleNativeWidth
+            / referencePixelsPerWorldX
+            / attackBurstTextureVisibleWidthRatio,
+        height: attackBurstVisibleNativeHeight
+            / referencePixelsPerWorldY
+            / attackBurstTextureVisibleHeightRatio
+    )
+    static let attackBurstAppearDuration: TimeInterval = 4.0 / 60.0
+    static let attackBurstHoldDuration: TimeInterval = 4.0 / 60.0
+    static let attackBurstFadeDuration: TimeInterval = 1.0 / 60.0
     static let thornShardCount = 6
     static let thornShardSpeed: CGFloat = 540
     static let thornShardRange: CGFloat = 1700
     static let thornShardDamage: CGFloat = 10
     static let thornShardRadius: CGFloat = 24
-    static let thornShardVisualWidth: CGFloat = 2.5 * targetPointsPerMillimeter
-    // The latest side-by-side ruler check shows the reference thorn is just under
-    // 1.5 mm while the previous render was nearly 2 mm long. Preserve its width
-    // and shorten only the direction-aligned axis by the measured ~0.72 ratio.
-    static let thornShardVisualLength: CGFloat = 2.9 * targetPointsPerMillimeter
+    static let thornShardVisualWidthMillimeters: CGFloat = 2.0
+    static let thornShardVisualLengthMillimeters: CGFloat = 3.15
+    static let thornShardVisualWidth: CGFloat =
+        thornShardVisualWidthMillimeters * targetPointsPerMillimeter
+    static let thornShardVisualLength: CGFloat =
+        thornShardVisualLengthMillimeters * targetPointsPerMillimeter
+    static let thornShardTextureVisibleLengthRatio: CGFloat = 0.5227
+    static let thornShardTextureVisibleWidthRatio: CGFloat = 0.5282
     // The six reference boundary captures constrain the shard collision core
     // to roughly 1.25 mm. It is a ground-plane circle around the shard shadow,
     // not a percentage of the visible triangular artwork.
@@ -247,14 +304,89 @@ enum GameConfig {
     // roughly this radius. Edge pressure should use this standoff distance so
     // the thorn can connect without forcing a main-ball contact.
     static let thornShardForwardCrossingDistance: CGFloat = 84
-    static let enemyThornAttackPositionDistance: CGFloat = enemyVisualRadius
-        + thornBallSpawnInset
-        + thornBallRange
-        + thornShardForwardCrossingDistance
+    static let enemyThornAttackPositionDistance: CGFloat =
+        enemyThornAttackPositionDistance(for: CGVector(dx: 0, dy: -1))
     static let enemyThornAttackDistanceTolerance: CGFloat = tileSize * 0.45
 
     static let maxAmmo = 3
-    static let reloadInterval: TimeInterval = 1.0
+    static let reloadInterval: TimeInterval = 2.0
     static let shakeDuration: TimeInterval = 0.18
     static let shakeAmplitude: CGFloat = 10
+
+    static func thornBallTravelCentimeters(for direction: CGVector) -> CGFloat {
+        let normalized = direction.normalized
+        guard hypot(normalized.dx, normalized.dy) > 0.000_001 else {
+            return thornBallTravelCentimeters
+        }
+
+        // Convert the world vector to its displayed direction before sampling
+        // the measured table; the scene's X and Y world scales are different.
+        var screenAngle = atan2(
+            normalized.dy * referencePixelsPerWorldY,
+            normalized.dx * referencePixelsPerWorldX
+        )
+        if screenAngle < 0 {
+            screenAngle += 2 * .pi
+        }
+
+        let samplePosition = screenAngle / thornBallDirectionStepRadians
+        let lowerIndex = Int(floor(samplePosition))
+            % thornBallTravelCentimetersByScreenDirection.count
+        let upperIndex = (lowerIndex + 1)
+            % thornBallTravelCentimetersByScreenDirection.count
+        let fraction = samplePosition - CGFloat(floor(samplePosition))
+        let lower = thornBallTravelCentimetersByScreenDirection[lowerIndex]
+        let upper = thornBallTravelCentimetersByScreenDirection[upperIndex]
+        return lower + (upper - lower) * fraction
+    }
+
+    static func thornBallWorldRange(for direction: CGVector) -> CGFloat {
+        let normalized = direction.normalized
+        let nativePixelsPerWorldAlongDirection = hypot(
+            normalized.dx * referencePixelsPerWorldX,
+            normalized.dy * referencePixelsPerWorldY
+        )
+        guard nativePixelsPerWorldAlongDirection > 0.000_001 else {
+            return thornBallRange
+        }
+        let measuredTravelNativePixels = thornBallTravelCentimeters(for: direction)
+            * targetNativePixelsPerInch
+            / 2.54
+        return measuredTravelNativePixels / nativePixelsPerWorldAlongDirection
+    }
+
+    static func thornShardSpriteSize(for direction: CGVector) -> CGSize {
+        let normalized = direction.normalized
+        let safeDirection = hypot(normalized.dx, normalized.dy) > 0.000_001
+            ? normalized
+            : CGVector(dx: 1, dy: 0)
+        let perpendicular = CGVector(dx: -safeDirection.dy, dy: safeDirection.dx)
+        let nativePixelsPerWorldAlongLength = hypot(
+            safeDirection.dx * referencePixelsPerWorldX,
+            safeDirection.dy * referencePixelsPerWorldY
+        )
+        let nativePixelsPerWorldAlongWidth = hypot(
+            perpendicular.dx * referencePixelsPerWorldX,
+            perpendicular.dy * referencePixelsPerWorldY
+        )
+        let visibleLengthNativePixels =
+            thornShardVisualLengthMillimeters * referencePixelsPerMillimeter
+        let visibleWidthNativePixels =
+            thornShardVisualWidthMillimeters * referencePixelsPerMillimeter
+        return CGSize(
+            width: visibleLengthNativePixels
+                / nativePixelsPerWorldAlongLength
+                / thornShardTextureVisibleLengthRatio,
+            height: visibleWidthNativePixels
+                / nativePixelsPerWorldAlongWidth
+                / thornShardTextureVisibleWidthRatio
+        )
+    }
+
+    static func enemyThornAttackPositionDistance(for direction: CGVector) -> CGFloat {
+        enemyVisualRadius
+            + thornBallSpawnInset
+            + thornBallWorldRange(for: direction)
+            + thornShardForwardCrossingDistance
+    }
 }
