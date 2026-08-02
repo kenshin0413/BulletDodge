@@ -10,11 +10,14 @@ import FirebaseCore
 import FirebaseAnalytics
 
 class AppDelegate: NSObject, UIApplicationDelegate {
-  func application(_ application: UIApplication,
-                   didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-    FirebaseApp.configure()
-    return true
-  }
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        FirebaseApp.configure()
+
+        FirebaseApp.app()?.isDataCollectionDefaultEnabled = true
+
+        return true
+    }
 }
 
 @main
@@ -32,23 +35,20 @@ private struct LaunchFlowView: View {
 
     var body: some View {
         ZStack {
-            if !isShowingSplash {
-                ContentView()
-                    .transition(.opacity)
-            }
+            // Keep the home screen ready behind the splash so its own fade can
+            // reveal a fully laid-out screen without a blank or loading frame.
+            ContentView()
+                .allowsHitTesting(!isShowingSplash)
 
             if isShowingSplash {
                 SplashView {
                     guard !DebugSplashOptions.shouldHold else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        isShowingSplash = false
-                    }
+                    isShowingSplash = false
                 }
-                .transition(.opacity)
                 .zIndex(1)
             }
         }
-        .background(Color(red: 0.008, green: 0.008, blue: 0.012))
+        .background(Color(red: 0.91, green: 0.85, blue: 0.73))
     }
 }
 
