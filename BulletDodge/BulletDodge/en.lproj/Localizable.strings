@@ -16,6 +16,21 @@
 "home.start" = "Play Now";
 "home.start_hint" = "Start SpikeDodge";
 
+"settings.open" = "Settings";
+"settings.close" = "Close settings";
+"settings.title" = "Settings";
+"settings.joystick_title" = "Movement Controls";
+"settings.joystick.fixed" = "Fixed";
+"settings.joystick.fixed_description" = "Stays at the lower left.";
+"settings.joystick.floating" = "Floating";
+"settings.joystick.floating_description" = "Appears wherever you touch.";
+"settings.speed_title" = "Movement Speed";
+"settings.speed.slow" = "Slow";
+"settings.speed.normal" = "Normal";
+"settings.speed.fast" = "Fast";
+"settings.speed.ultraFast" = "Ultra";
+"settings.selected" = "Selected";
+
 "update.title" = "Update Available";
 "update.message" = "Version %@ is available. Would you like to update now?";
 "update.later" = "Later";
@@ -43,17 +58,22 @@
 "stats.dodged" = "DODGED";
 "stats.hits" = "HITS";
 "stats.avoidance_rate" = "DODGE RATE";
+"stats.movement_speed" = "MOVE SPEED";
 "stats.rank" = "RANK";
 "stats.new" = "NEW";
 
+"rank.ss.headline" = "Beyond the limit";
+"rank.ss.message" = "You survived both Hypercharges. This highest rank belongs to the elite.";
 "rank.s.headline" = "Untouchable";
-"rank.s.message" = "You read the entire bullet storm. Now push for a new personal best.";
+"rank.s.message" = "You read the entire bullet storm. Now push for SS rank.";
 "rank.a.headline" = "Lightning reflexes";
 "rank.a.message" = "You saw the dangerous paths clearly. S rank is within reach.";
 "rank.b.headline" = "Nice moves";
 "rank.b.message" = "You found your dodging rhythm. Next time, keep a wider view.";
 "rank.c.headline" = "You can go further";
 "rank.c.message" = "Watch the enemy's wind-up to predict each path. Give it another shot.";
+"rank.d.headline" = "It starts here";
+"rank.d.message" = "Watch each spike's path first. Smaller movements make dodging easier.";
 
 "accessibility.rank" = "Rank %@";
 "format.seconds_short" = "%.1fs";

@@ -8,6 +8,7 @@ enum GameTheme {
     static let coral = Color(red: 1.00, green: 0.29, blue: 0.35)
     static let gold = Color(red: 1.00, green: 0.73, blue: 0.20)
     static let mint = Color(red: 0.30, green: 0.91, blue: 0.62)
+    static let violet = Color(red: 0.76, green: 0.38, blue: 1.00)
     static let softText = Color.white.opacity(0.68)
 }
 

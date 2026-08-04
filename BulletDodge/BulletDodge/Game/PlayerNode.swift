@@ -73,7 +73,12 @@ final class PlayerNode: SKNode {
         updateHealthBar()
     }
 
-    func applyMovement(input: CGVector, deltaTime: TimeInterval, mapRect: CGRect) {
+    func applyMovement(
+        input: CGVector,
+        deltaTime: TimeInterval,
+        mapRect: CGRect,
+        movementSpeed: CGFloat
+    ) {
         let movementInput = input.length > 0.05 ? input.normalized : .zero
         let facingInput = debugFacingAngle == nil ? movementInput : .zero
 
@@ -84,14 +89,18 @@ final class PlayerNode: SKNode {
             targetFacingAngle = debugFacingAngle
         }
 
-        updateVelocity(with: movementInput, deltaTime: deltaTime)
+        updateVelocity(
+            with: movementInput,
+            deltaTime: deltaTime,
+            movementSpeed: movementSpeed
+        )
         let delta = velocity * CGFloat(deltaTime)
         let nextPosition = CGPoint(x: position.x + delta.dx, y: position.y + delta.dy)
         position = nextPosition.clamped(
             in: mapRect.insetBy(dx: GameConfig.playerCollisionRadius, dy: GameConfig.playerCollisionRadius)
         )
 
-        let movementStrength = min(1, velocity.length / max(1, GameConfig.playerSpeed))
+        let movementStrength = min(1, velocity.length / max(1, movementSpeed))
         figure.update(deltaTime: deltaTime, facingAngle: facingAngle, movementStrength: movementStrength)
         updateDirectionalHeight()
         shadowNode.xScale = 1 - movementStrength * 0.08
@@ -212,10 +221,16 @@ final class PlayerNode: SKNode {
         return deltaX * deltaX + deltaY * deltaY <= radius * radius
     }
 
-    private func updateVelocity(with input: CGVector, deltaTime: TimeInterval) {
+    private func updateVelocity(
+        with input: CGVector,
+        deltaTime: TimeInterval,
+        movementSpeed: CGFloat
+    ) {
         guard input != .zero else {
-            let maximumChange =
-                GameConfig.playerReleaseDeceleration * CGFloat(deltaTime)
+            let speedRatio = movementSpeed / max(1, GameConfig.playerSpeed)
+            let maximumChange = GameConfig.playerReleaseDeceleration
+                * speedRatio
+                * CGFloat(deltaTime)
             if velocity.length <= maximumChange {
                 velocity = .zero
             } else {
@@ -225,7 +240,7 @@ final class PlayerNode: SKNode {
             return
         }
 
-        let desiredVelocity = input * GameConfig.playerSpeed
+        let desiredVelocity = input * movementSpeed
         let difference = CGVector(
             dx: desiredVelocity.dx - velocity.dx,
             dy: desiredVelocity.dy - velocity.dy
@@ -256,7 +271,10 @@ final class PlayerNode: SKNode {
             return
         }
 
-        let maximumChange = GameConfig.playerMovementAcceleration * CGFloat(deltaTime)
+        let speedRatio = movementSpeed / max(1, GameConfig.playerSpeed)
+        let maximumChange = GameConfig.playerMovementAcceleration
+            * speedRatio
+            * CGFloat(deltaTime)
         if difference.length <= maximumChange {
             velocity = desiredVelocity
             isRateLimitedVelocityTransition = false
