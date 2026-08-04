@@ -2,6 +2,12 @@ import SpriteKit
 import UIKit
 
 final class GameScene: SKScene {
+    private struct PendingHyperchargeExplosion {
+        var timeRemaining: TimeInterval
+        let explosion: ExplosionSpec
+        let coreNode: SKNode
+    }
+
     private enum AutoWallPhase: CaseIterable {
         case bottomCenter
         case bottomLeft
@@ -51,9 +57,12 @@ final class GameScene: SKScene {
     private let mapNode = SKShapeNode(rectOf: GameConfig.mapSize, cornerRadius: 0)
     private let player = PlayerNode()
     private let enemy = EnemyNode()
-    private let joystick = VirtualJoystick()
+    private let joystick: VirtualJoystick
+    private let playerSpeedSetting: PlayerSpeedSetting
+    private let playerMovementSpeed: CGFloat
     private let gameCamera = SKCameraNode()
     private let ammoIndicator = SKNode()
+    private let hyperchargeAura = SKNode()
     private let ammoBackdrop = SKShapeNode(
         rectOf: CGSize(width: 48, height: 18),
         cornerRadius: 9
@@ -73,6 +82,9 @@ final class GameScene: SKScene {
     private var joystickTouch: UITouch?
     private var enemyReferencePoint: CGPoint = .zero
     private var queuedEnemyTargetPoint: CGPoint?
+    private var queuedEnemyAttackVariant: ThornAttackVariant?
+    private var pendingHyperchargeExplosions: [PendingHyperchargeExplosion] = []
+    private var isHyperchargeActive = false
     private var isWallPressureRecoveryActive = false
     private var autoWallPhase: AutoWallPhase = .bottomCenter
     private var autoWallHoldTimeRemaining: TimeInterval = 0
@@ -110,7 +122,25 @@ final class GameScene: SKScene {
         }
     }
 
-    init(seed: UUID, sessionStore: GameSessionStore, onGameOver: @escaping (GameResult) -> Void) {
+    init(
+        seed: UUID,
+        joystickMode: JoystickMode,
+        playerSpeedSetting: PlayerSpeedSetting,
+        sessionStore: GameSessionStore,
+        onGameOver: @escaping (GameResult) -> Void
+    ) {
+        joystick = VirtualJoystick(mode: joystickMode)
+        self.playerSpeedSetting = playerSpeedSetting
+        playerMovementSpeed = switch playerSpeedSetting {
+        case .slow:
+            GameConfig.slowPlayerSpeed
+        case .normal:
+            GameConfig.playerSpeed
+        case .fast:
+            GameConfig.fastPlayerSpeed
+        case .ultraFast:
+            GameConfig.ultraFastPlayerSpeed
+        }
         self.sessionStore = sessionStore
         self.onGameOver = onGameOver
         super.init(size: CGSize(width: 932, height: 430))
@@ -153,7 +183,13 @@ final class GameScene: SKScene {
         lastUpdateTime = currentTime
 
         survivalTime += deltaTime
-        player.applyMovement(input: currentMovementInput, deltaTime: deltaTime, mapRect: playableRect)
+        updateHyperchargeState()
+        player.applyMovement(
+            input: currentMovementInput,
+            deltaTime: deltaTime,
+            mapRect: playableRect,
+            movementSpeed: playerMovementSpeed
+        )
         player.position = constrainedArenaPosition(player.position, collisionRadius: GameConfig.playerCollisionRadius)
         if autoWallTest {
             updateAutoWallRoute(deltaTime: deltaTime)
@@ -185,23 +221,118 @@ final class GameScene: SKScene {
             case .beganThrow(let shotContext):
                 let targetPoint = makeThrowTargetPoint(for: shotContext)
                 queuedEnemyTargetPoint = targetPoint
+                queuedEnemyAttackVariant = currentAttackVariant
                 enemy.faceAttack(toward: targetPoint)
                 scheduleAutoAttackCaptures()
             case .releaseProjectile(let shotContext):
                 let targetPoint = queuedEnemyTargetPoint
                     ?? makeThrowTargetPoint(for: shotContext)
+                let attackVariant = queuedEnemyAttackVariant
+                    ?? currentAttackVariant
                 queuedEnemyTargetPoint = nil
-                spawnBullet(toward: targetPoint)
+                queuedEnemyAttackVariant = nil
+                spawnBullet(toward: targetPoint, variant: attackVariant)
             }
         }
 
         updateBullets(deltaTime: deltaTime)
+        updatePendingHyperchargeExplosions(deltaTime: deltaTime)
         updateCameraShake(deltaTime: deltaTime)
         updateCameraPosition()
         updateAmmoLabel()
         publishSnapshot()
         logAutoWallState(deltaTime: deltaTime)
         runAutoAttackCaptureIfNeeded()
+    }
+
+    private var currentAttackVariant: ThornAttackVariant {
+        isHyperchargeActive ? .hypercharge : .normal
+    }
+
+    private func updateHyperchargeState() {
+        let shouldBeActive = GameConfig.hyperchargeStartTimes.contains { startTime in
+            survivalTime >= startTime
+                && survivalTime < startTime + GameConfig.hyperchargeDuration
+        }
+        guard shouldBeActive != isHyperchargeActive else { return }
+
+        isHyperchargeActive = shouldBeActive
+        setHyperchargeAuraActive(shouldBeActive)
+
+        if shouldBeActive {
+            // Projectiles and throw wind-ups keep the variant they had when
+            // launched. Only attacks begun after activation become purple.
+            spawnHyperchargeActivationBurst()
+        }
+    }
+
+    private func configureHyperchargeAura() {
+        guard hyperchargeAura.parent == nil else { return }
+        hyperchargeAura.zPosition = -2
+        hyperchargeAura.isHidden = true
+
+        let groundRing = SKShapeNode(
+            ellipseOf: CGSize(
+                width: GameConfig.enemyVisualRadius * 2.15,
+                height: GameConfig.enemyVisualRadius * 0.90
+            )
+        )
+        groundRing.fillColor = UIColor(red: 0.39, green: 0.05, blue: 0.70, alpha: 0.22)
+        groundRing.strokeColor = UIColor(red: 0.76, green: 0.27, blue: 1.0, alpha: 0.96)
+        groundRing.lineWidth = 3.2
+        groundRing.glowWidth = 9
+        groundRing.run(.repeatForever(.sequence([
+            .group([
+                .scale(to: 1.08, duration: 0.34),
+                .fadeAlpha(to: 0.72, duration: 0.34)
+            ]),
+            .group([
+                .scale(to: 0.94, duration: 0.34),
+                .fadeAlpha(to: 1.0, duration: 0.34)
+            ])
+        ])))
+        hyperchargeAura.addChild(groundRing)
+
+        let orbit = SKNode()
+        orbit.position = CGPoint(x: 0, y: GameConfig.enemyVisualRadius * 0.32)
+        for index in 0..<6 {
+            let angle = CGFloat(index) * (.pi * 2 / 6)
+            let spark = SKShapeNode(circleOfRadius: 3.2)
+            spark.position = CGPoint(
+                x: cos(angle) * GameConfig.enemyVisualRadius * 0.88,
+                y: sin(angle) * GameConfig.enemyVisualRadius * 0.58
+            )
+            spark.fillColor = UIColor(red: 0.80, green: 0.38, blue: 1.0, alpha: 0.92)
+            spark.strokeColor = UIColor.white.withAlphaComponent(0.75)
+            spark.lineWidth = 0.7
+            spark.glowWidth = 6
+            orbit.addChild(spark)
+        }
+        orbit.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 1.15)))
+        hyperchargeAura.addChild(orbit)
+        enemy.addChild(hyperchargeAura)
+    }
+
+    private func setHyperchargeAuraActive(_ isActive: Bool) {
+        hyperchargeAura.isHidden = !isActive
+    }
+
+    private func spawnHyperchargeActivationBurst() {
+        let ring = SKShapeNode(circleOfRadius: GameConfig.enemyVisualRadius * 0.74)
+        ring.position = enemy.position
+        ring.zPosition = 29
+        ring.fillColor = UIColor.clear
+        ring.strokeColor = UIColor(red: 0.73, green: 0.22, blue: 1.0, alpha: 0.95)
+        ring.lineWidth = 5
+        ring.glowWidth = 14
+        addChild(ring)
+        ring.run(.sequence([
+            .group([
+                .scale(to: 2.45, duration: 0.32),
+                .fadeOut(withDuration: 0.32)
+            ]),
+            .removeFromParent()
+        ]))
     }
 
     private func constrainedArenaPosition(_ point: CGPoint, collisionRadius: CGFloat) -> CGPoint {
@@ -406,12 +537,25 @@ final class GameScene: SKScene {
         buildMapBackground()
 
         configureAmmoIndicator()
+        configureHyperchargeAura()
         joystick.isHidden = autoWallCapture
 
         resetState()
         BulletNode.prewarmVisualResources()
         hitFeedback.prepare()
         layoutOverlayNodes()
+#if DEBUG
+        if ProcessInfo.processInfo.environment["BULLETDODGE_PREVIEW_FLOATING_JOYSTICK"] == "1" {
+            let origin = CGPoint(
+                x: -size.width / 2 + 106,
+                y: -size.height / 2 + 96
+            )
+            joystick.showFloatingPreview(
+                at: origin,
+                draggedTo: CGPoint(x: origin.x + 84, y: origin.y + 28)
+            )
+        }
+#endif
         updateCameraScale()
         updateCameraPosition()
         updateAmmoLabel()
@@ -423,6 +567,11 @@ final class GameScene: SKScene {
         explosionContainer.removeAllChildren()
         lastUpdateTime = 0
         survivalTime = 0
+#if DEBUG
+        survivalTime = TimeInterval(
+            ProcessInfo.processInfo.environment["BULLETDODGE_START_TIME"] ?? "0"
+        ) ?? 0
+#endif
         dodgedCount = 0
         hitCount = 0
         gameEnded = false
@@ -435,8 +584,13 @@ final class GameScene: SKScene {
         autoAttackCaptureSchedule.removeAll()
         currentAttackCaptureID = 0
         queuedEnemyTargetPoint = nil
+        queuedEnemyAttackVariant = nil
+        pendingHyperchargeExplosions.forEach { $0.coreNode.removeFromParent() }
+        pendingHyperchargeExplosions.removeAll()
+        isHyperchargeActive = false
+        setHyperchargeAuraActive(false)
         isWallPressureRecoveryActive = false
-        joystick.removeAllActions()
+        joystick.reset()
 
         player.reset()
         enemy.reset()
@@ -1671,6 +1825,30 @@ final class GameScene: SKScene {
         bullets = survivors + spawnedFragments
     }
 
+    private func updatePendingHyperchargeExplosions(deltaTime: TimeInterval) {
+        guard !pendingHyperchargeExplosions.isEmpty else { return }
+
+        var waiting: [PendingHyperchargeExplosion] = []
+        var spawnedFragments: [BulletNode] = []
+        waiting.reserveCapacity(pendingHyperchargeExplosions.count)
+
+        for var pending in pendingHyperchargeExplosions {
+            pending.timeRemaining -= deltaTime
+            if pending.timeRemaining > 0 {
+                waiting.append(pending)
+                continue
+            }
+
+            pending.coreNode.removeFromParent()
+            spawnedFragments.append(
+                contentsOf: resolveExplosion(pending.explosion)
+            )
+        }
+
+        pendingHyperchargeExplosions = waiting
+        bullets.append(contentsOf: spawnedFragments)
+    }
+
     private func detectHit(for bullet: BulletNode) -> Bool {
         if autoAttackTest || (GameConfig.debugCornerAttackTestEnabled
             && !GameConfig.debugCornerDamageEnabled) {
@@ -1702,7 +1880,10 @@ final class GameScene: SKScene {
         return true
     }
 
-    private func spawnBullet(toward targetPoint: CGPoint) {
+    private func spawnBullet(
+        toward targetPoint: CGPoint,
+        variant: ThornAttackVariant
+    ) {
         let direction = CGVector(
             dx: targetPoint.x - enemy.position.x,
             dy: targetPoint.y - enemy.position.y
@@ -1716,7 +1897,10 @@ final class GameScene: SKScene {
                 + direction.dy * (GameConfig.enemyVisualRadius + GameConfig.thornBallSpawnInset)
                 + rightHandOffset.dy * (GameConfig.tileSize * 0.22)
         )
-        let bullet = BulletNode.thornBall(direction: direction)
+        let bullet = BulletNode.thornBall(
+            direction: direction,
+            variant: variant
+        )
         bullet.position = spawnPoint
         bullet.zPosition = 25
         bullets.append(bullet)
@@ -1909,12 +2093,32 @@ final class GameScene: SKScene {
 
     private func handleExplosion(_ explosion: ExplosionSpec, from bullet: BulletNode) -> [BulletNode] {
         bullet.removeFromParent()
+        let fragments = resolveExplosion(explosion)
+
+        if explosion.variant == .hypercharge {
+            let coreNode = spawnHyperchargeCore(at: explosion.position)
+            pendingHyperchargeExplosions.append(
+                PendingHyperchargeExplosion(
+                    timeRemaining: GameConfig.hyperchargeSecondExplosionDelay,
+                    explosion: explosion,
+                    coreNode: coreNode
+                )
+            )
+        }
+
+        return fragments
+    }
+
+    private func resolveExplosion(_ explosion: ExplosionSpec) -> [BulletNode] {
         applySplashDamage(
             at: explosion.damagePosition,
             radius: explosion.splashRadius,
             damage: explosion.splashDamage
         )
-        spawnExplosionEffect(at: explosion.position)
+        spawnExplosionEffect(
+            at: explosion.position,
+            variant: explosion.variant
+        )
         if GameConfig.debugProjectileLoggingEnabled {
             print(
                 "EXPLODE pos=(\(Int(explosion.position.x)),\(Int(explosion.position.y))) "
@@ -1930,7 +2134,8 @@ final class GameScene: SKScene {
             let fragment = BulletNode.thornShard(
                 direction: fragmentSpec.direction,
                 angularVelocity: fragmentSpec.angularVelocity,
-                keyframes: fragmentSpec.keyframes
+                keyframes: fragmentSpec.keyframes,
+                variant: explosion.variant
             )
             fragment.position = CGPoint(
                 x: explosion.position.x,
@@ -1974,11 +2179,18 @@ final class GameScene: SKScene {
         }
     }
 
-    private func spawnExplosionEffect(at position: CGPoint) {
+    private func spawnExplosionEffect(
+        at position: CGPoint,
+        variant: ThornAttackVariant
+    ) {
         let burst = SKSpriteNode(
             texture: BulletNode.burstTexture,
             size: GameConfig.attackBurstSpriteSize
         )
+        if variant == .hypercharge {
+            burst.shader = BulletNode.hyperchargePaletteShader
+            burst.blendMode = .add
+        }
         burst.position = position
         burst.zPosition = 26
         burst.alpha = 0
@@ -1995,6 +2207,28 @@ final class GameScene: SKScene {
             .fadeOut(withDuration: GameConfig.attackBurstFadeDuration)
         ])
         burst.run(.sequence([appear, hold, disappear, .removeFromParent()]))
+    }
+
+    private func spawnHyperchargeCore(at position: CGPoint) -> SKNode {
+        let core = SKShapeNode(circleOfRadius: GameConfig.explosionRadius * 0.42)
+        core.position = position
+        core.zPosition = 26
+        core.fillColor = UIColor(red: 0.53, green: 0.05, blue: 0.91, alpha: 0.88)
+        core.strokeColor = UIColor(red: 0.91, green: 0.68, blue: 1.0, alpha: 0.96)
+        core.lineWidth = 2.2
+        core.glowWidth = 10
+        addChild(core)
+        core.run(.repeatForever(.sequence([
+            .group([
+                .scale(to: 1.18, duration: 0.16),
+                .fadeAlpha(to: 0.68, duration: 0.16)
+            ]),
+            .group([
+                .scale(to: 0.88, duration: 0.16),
+                .fadeAlpha(to: 1.0, duration: 0.16)
+            ])
+        ])))
+        return core
     }
 
     private func playHitFeedback() {
@@ -2078,7 +2312,8 @@ final class GameScene: SKScene {
         let result = GameResult(
             survivalTime: survivalTime,
             dodgedCount: dodgedCount,
-            hitCount: hitCount
+            hitCount: hitCount,
+            playerSpeedSetting: playerSpeedSetting
         )
 
         Task { @MainActor in

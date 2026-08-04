@@ -408,15 +408,17 @@ final class EnemyNode: SKNode {
             return .none
         }
         guard nextFireTimer <= 0, ammo > 0 else { return .none }
-        guard currentPlayerDistance <= currentAttackPositionDistance
-            + GameConfig.enemyThornAttackDistanceTolerance else { return .none }
-        if isArenaEdgePressureActive {
-            guard currentPlayerDistance >= currentAttackPositionDistance
-                - GameConfig.enemyThornAttackDistanceTolerance else { return .none }
-        }
-        if movementMode == .approaching,
-           currentPlayerDistance > GameConfig.enemyApproachFireDistance {
-            return .none
+        if !GameConfig.autoAttackTestEnabled {
+            guard currentPlayerDistance <= currentAttackPositionDistance
+                + GameConfig.enemyThornAttackDistanceTolerance else { return .none }
+            if isArenaEdgePressureActive {
+                guard currentPlayerDistance >= currentAttackPositionDistance
+                    - GameConfig.enemyThornAttackDistanceTolerance else { return .none }
+            }
+            if movementMode == .approaching,
+               currentPlayerDistance > GameConfig.enemyApproachFireDistance {
+                return .none
+            }
         }
 
         if burstShotsRemaining == 0 {

@@ -98,6 +98,23 @@ enum GameConfig {
         * playerMeasuredSpeedCorrection
         * playerFinalTraverseCorrection
         * autoWallTestSpeedMultiplier
+    // Starting from rest, the acceleration ramp adds 1/18 second to a full
+    // traverse. Calibrate each mode across the widest near wall.
+    static let slowPlayerTraverseDuration: TimeInterval = 9.15
+    static let fastPlayerTraverseDuration: TimeInterval = 7.4
+    static let ultraFastPlayerTraverseDuration: TimeInterval = 6.8
+    private static let playerNearWallTraverseDistance: CGFloat =
+        playableNearWidth - playerCollisionRadius * 2
+    private static let playerAccelerationTraverseTime: TimeInterval = 1.0 / 18.0
+    static let slowPlayerSpeed: CGFloat = (
+        playerNearWallTraverseDistance
+    ) / CGFloat(slowPlayerTraverseDuration - playerAccelerationTraverseTime)
+    static let fastPlayerSpeed: CGFloat = (
+        playerNearWallTraverseDistance
+    ) / CGFloat(fastPlayerTraverseDuration - playerAccelerationTraverseTime)
+    static let ultraFastPlayerSpeed: CGFloat = (
+        playerNearWallTraverseDistance
+    ) / CGFloat(ultraFastPlayerTraverseDuration - playerAccelerationTraverseTime)
     // The matched 180-degree captures reach zero in roughly 6-8 frames and
     // settle at full opposite speed in 12-15 frames. A 9x linear acceleration
     // gives 0.111 s to zero and 0.222 s for the complete reversal.
@@ -278,6 +295,11 @@ enum GameConfig {
     static let attackBurstAppearDuration: TimeInterval = 4.0 / 60.0
     static let attackBurstHoldDuration: TimeInterval = 4.0 / 60.0
     static let attackBurstFadeDuration: TimeInterval = 1.0 / 60.0
+    static let hyperchargeStartTimes: [TimeInterval] = [35.0, 60.0]
+    static let hyperchargeDuration: TimeInterval = 7.0
+    // The supplied 60 fps reference places the second six-thorn burst about
+    // 42 frames after the first burst at the same landing point.
+    static let hyperchargeSecondExplosionDelay: TimeInterval = 0.70
     static let thornShardCount = 6
     static let thornShardSpeed: CGFloat = 540
     static let thornShardRange: CGFloat = 1700

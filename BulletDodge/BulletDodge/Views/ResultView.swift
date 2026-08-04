@@ -68,7 +68,11 @@ struct ResultView: View {
                 .padding(.top, 36 * scale)
 
             Text(rank.letter)
-                .font(.system(size: 348 * scale, weight: .black, design: .serif))
+                .font(.system(
+                    size: (rank.letter == "SS" ? 250 : 348) * scale,
+                    weight: .black,
+                    design: .serif
+                ))
                 .foregroundStyle(
                     LinearGradient(
                         colors: [
@@ -82,6 +86,7 @@ struct ResultView: View {
                 )
                 .shadow(color: Color(red: 0.30, green: 0.19, blue: 0.07), radius: 1 * scale)
                 .shadow(color: .black.opacity(0.30), radius: 5 * scale, y: 7 * scale)
+                .lineLimit(1)
                 .frame(height: 312 * scale)
                 .scaleEffect(appeared ? 1 : 0.80)
                 .opacity(appeared ? 1 : 0)
@@ -172,6 +177,16 @@ struct ResultView: View {
                 resultRow(
                     label: L10n.text("stats.avoidance_rate"),
                     value: "\(avoidanceRate)%",
+                    accent: Color(red: 0.04, green: 0.22, blue: 0.25),
+                    badge: nil,
+                    scale: scale
+                )
+
+                resultRow(
+                    label: L10n.text("stats.movement_speed"),
+                    value: L10n.text(
+                        "settings.speed.\(result.playerSpeedSetting.rawValue)"
+                    ),
                     accent: Color(red: 0.04, green: 0.22, blue: 0.25),
                     badge: nil,
                     scale: scale
@@ -356,7 +371,12 @@ private struct ResultRank {
     let color: Color
 
     init(survivalTime: TimeInterval) {
-        if survivalTime >= 45 {
+        if survivalTime >= 68 {
+            letter = "SS"
+            headline = L10n.text("rank.ss.headline")
+            message = L10n.text("rank.ss.message")
+            color = GameTheme.violet
+        } else if survivalTime >= 45 {
             letter = "S"
             headline = L10n.text("rank.s.headline")
             message = L10n.text("rank.s.message")
@@ -371,18 +391,28 @@ private struct ResultRank {
             headline = L10n.text("rank.b.headline")
             message = L10n.text("rank.b.message")
             color = GameTheme.cyan
-        } else {
+        } else if survivalTime >= 10 {
             letter = "C"
             headline = L10n.text("rank.c.headline")
             message = L10n.text("rank.c.message")
             color = GameTheme.coral
+        } else {
+            letter = "D"
+            headline = L10n.text("rank.d.headline")
+            message = L10n.text("rank.d.message")
+            color = GameTheme.softText
         }
     }
 }
 
 #Preview("Landscape") {
     ResultView(
-        result: GameResult(survivalTime: 31.4, dodgedCount: 62, hitCount: 3),
+        result: GameResult(
+            survivalTime: 31.4,
+            dodgedCount: 62,
+            hitCount: 3,
+            playerSpeedSetting: .normal
+        ),
         bestSurvivalTime: 104.8,
         bestDodgedCount: 369,
         didSetTimeRecord: false,

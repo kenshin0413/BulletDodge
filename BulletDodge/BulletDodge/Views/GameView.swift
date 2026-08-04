@@ -7,10 +7,23 @@ struct GameView: View {
     @State private var scene: GameScene
     private let hideHUD = ProcessInfo.processInfo.environment["BULLETDODGE_HIDE_HUD"] == "1"
 
-    init(seed: UUID, onGameOver: @escaping (GameResult) -> Void) {
+    init(
+        seed: UUID,
+        joystickMode: JoystickMode,
+        playerSpeedSetting: PlayerSpeedSetting,
+        onGameOver: @escaping (GameResult) -> Void
+    ) {
         let store = GameSessionStore()
         _sessionStore = StateObject(wrappedValue: store)
-        _scene = State(initialValue: GameScene(seed: seed, sessionStore: store, onGameOver: onGameOver))
+        _scene = State(
+            initialValue: GameScene(
+                seed: seed,
+                joystickMode: joystickMode,
+                playerSpeedSetting: playerSpeedSetting,
+                sessionStore: store,
+                onGameOver: onGameOver
+            )
+        )
     }
 
     var body: some View {
@@ -38,7 +51,11 @@ struct GameView: View {
     private var survivalTimeHUD: some View {
         HStack(spacing: 10) {
             Text(currentRankLetter)
-                .font(.system(size: 20, weight: .black, design: .serif))
+                .font(.system(
+                    size: currentRankLetter == "SS" ? 15 : 20,
+                    weight: .black,
+                    design: .serif
+                ))
                 .foregroundStyle(rankAccent)
                 .frame(width: 34, height: 34)
                 .background(.black.opacity(0.32), in: Circle())
@@ -77,19 +94,23 @@ struct GameView: View {
 
     private var currentRankLetter: String {
         switch sessionStore.snapshot.survivalTime {
+        case 68...: "SS"
         case 45...: "S"
         case 35...: "A"
         case 20...: "B"
-        default: "C"
+        case 10...: "C"
+        default: "D"
         }
     }
 
     private var rankAccent: Color {
         switch currentRankLetter {
+        case "SS": GameTheme.violet
         case "S": GameTheme.gold
         case "A": GameTheme.mint
         case "B": GameTheme.cyan
-        default: GameTheme.coral
+        case "C": GameTheme.coral
+        default: GameTheme.softText
         }
     }
 }

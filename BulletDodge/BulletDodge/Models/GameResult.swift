@@ -4,4 +4,5 @@ struct GameResult: Codable, Equatable {
     let survivalTime: TimeInterval
     let dodgedCount: Int
     let hitCount: Int
+    let playerSpeedSetting: PlayerSpeedSetting
 }

@@ -24,12 +24,18 @@ struct ShardBurstTemplate {
     let keyframes: [ShardKeyframe]
 }
 
+enum ThornAttackVariant: Equatable {
+    case normal
+    case hypercharge
+}
+
 struct ExplosionSpec {
     let position: CGPoint
     let damagePosition: CGPoint
     let splashRadius: CGFloat
     let splashDamage: CGFloat
     let fragments: [FragmentSpec]
+    let variant: ThornAttackVariant
 }
 
 struct FragmentSpec {
@@ -51,6 +57,7 @@ final class BulletNode: SKNode {
     }
 
     private let kind: Kind
+    let attackVariant: ThornAttackVariant
     private let motion: BulletMotion
     private let fuseDuration: TimeInterval?
     private let collisionDelay: TimeInterval
@@ -80,6 +87,7 @@ final class BulletNode: SKNode {
 
     private init(
         kind: Kind,
+        attackVariant: ThornAttackVariant,
         direction: CGVector,
         moveSpeed: CGFloat,
         range: CGFloat,
@@ -92,6 +100,7 @@ final class BulletNode: SKNode {
         collisionDelay: TimeInterval = 0
     ) {
         self.kind = kind
+        self.attackVariant = attackVariant
         self.direction = direction.normalized
         self.spawnDirection = direction.normalized
         self.facingDirection = direction.normalized
@@ -144,9 +153,13 @@ final class BulletNode: SKNode {
         shadowNode.glowWidth = kind == .thornBall ? 2.2 : 1.4
         addChild(shadowNode)
 
-        trailNode.fillColor = UIColor(red: 0.48, green: 0.96, blue: 1.0, alpha: kind == .thornBall ? 0.14 : 0.18)
+        trailNode.fillColor = attackVariant == .hypercharge
+            ? UIColor(red: 0.67, green: 0.20, blue: 1.0, alpha: kind == .thornBall ? 0.30 : 0.38)
+            : UIColor(red: 0.48, green: 0.96, blue: 1.0, alpha: kind == .thornBall ? 0.14 : 0.18)
         trailNode.strokeColor = .clear
-        trailNode.glowWidth = kind == .thornBall ? 2.0 : 1.2
+        trailNode.glowWidth = attackVariant == .hypercharge
+            ? (kind == .thornBall ? 5.0 : 3.4)
+            : (kind == .thornBall ? 2.0 : 1.2)
         addChild(trailNode)
 
         orbitRoot.zPosition = -1
@@ -157,6 +170,12 @@ final class BulletNode: SKNode {
 
         addChild(visualRoot)
         spriteNode.blendMode = .alpha
+        if attackVariant == .hypercharge {
+            // Use a dedicated palette shader instead of tinting the ordinary
+            // red pixels. This preserves texture lighting while guaranteeing
+            // that no red body color survives in the hypercharge projectile.
+            spriteNode.shader = Self.hyperchargePaletteShader
+        }
         visualRoot.addChild(spriteNode)
 
         updateVisuals(deltaTime: 0)
@@ -166,10 +185,14 @@ final class BulletNode: SKNode {
         nil
     }
 
-    static func thornBall(direction: CGVector) -> BulletNode {
+    static func thornBall(
+        direction: CGVector,
+        variant: ThornAttackVariant = .normal
+    ) -> BulletNode {
         let calibratedRange = GameConfig.thornBallWorldRange(for: direction)
         return BulletNode(
             kind: .thornBall,
+            attackVariant: variant,
             direction: direction,
             moveSpeed: calibratedRange / CGFloat(GameConfig.thornBallLifetime),
             range: calibratedRange,
@@ -181,9 +204,15 @@ final class BulletNode: SKNode {
         )
     }
 
-    static func thornShard(direction: CGVector, angularVelocity: CGFloat, keyframes: [ShardKeyframe]) -> BulletNode {
+    static func thornShard(
+        direction: CGVector,
+        angularVelocity: CGFloat,
+        keyframes: [ShardKeyframe],
+        variant: ThornAttackVariant = .normal
+    ) -> BulletNode {
         BulletNode(
             kind: .thornShard,
+            attackVariant: variant,
             direction: direction,
             moveSpeed: GameConfig.thornShardSpeed,
             range: GameConfig.thornShardRange,
@@ -364,7 +393,8 @@ final class BulletNode: SKNode {
             // flight and landing. The burst artwork does not enlarge damage.
             splashRadius: contactRadius,
             splashDamage: GameConfig.explosionDamage,
-            fragments: fragments
+            fragments: fragments,
+            variant: attackVariant
         )
     }
 
@@ -439,7 +469,9 @@ final class BulletNode: SKNode {
         outerArc.position = CGPoint(x: -diameter * 0.24, y: 0)
         outerArc.xScale = 1.08
         outerArc.yScale = 0.76
-        outerArc.strokeColor = UIColor(red: 1.0, green: 0.73, blue: 0.78, alpha: 0.95)
+        outerArc.strokeColor = attackVariant == .hypercharge
+            ? UIColor(red: 0.78, green: 0.30, blue: 1.0, alpha: 1)
+            : UIColor(red: 1.0, green: 0.73, blue: 0.78, alpha: 0.95)
         outerArc.lineWidth = 1.8
         outerArc.lineCap = .round
         outerArc.glowWidth = 2.2
@@ -456,7 +488,9 @@ final class BulletNode: SKNode {
         innerArc.position = CGPoint(x: -diameter * 0.16, y: diameter * 0.02)
         innerArc.xScale = 1.10
         innerArc.yScale = 0.74
-        innerArc.strokeColor = UIColor.white.withAlphaComponent(0.76)
+        innerArc.strokeColor = attackVariant == .hypercharge
+            ? UIColor(red: 0.94, green: 0.76, blue: 1.0, alpha: 0.92)
+            : UIColor.white.withAlphaComponent(0.76)
         innerArc.lineWidth = 1.2
         innerArc.lineCap = .round
         innerArc.glowWidth = 1.4
@@ -575,4 +609,14 @@ final class BulletNode: SKNode {
     private static let ballTexture = SKTexture(imageNamed: "enemy_attack_ball")
     private static let shardTexture = SKTexture(imageNamed: "enemy_attack_shard")
     static let burstTexture = SKTexture(imageNamed: "enemy_attack_burst")
+    static let hyperchargePaletteShader = SKShader(source: """
+        void main() {
+            vec4 source = texture2D(u_texture, v_tex_coord);
+            float light = dot(source.rgb, vec3(0.299, 0.587, 0.114));
+            vec3 deepPurple = vec3(0.22, 0.00, 0.62);
+            vec3 brightPurple = vec3(0.82, 0.30, 1.00);
+            vec3 purple = mix(deepPurple, brightPurple, clamp(light * 1.35, 0.0, 1.0));
+            gl_FragColor = vec4(purple * source.a, source.a);
+        }
+        """)
 }

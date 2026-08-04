@@ -22,11 +22,19 @@ struct ContentView: View {
                 HomeView(
                     bestSurvivalTime: saveManager.bestSurvivalTime,
                     bestDodgedCount: saveManager.bestDodgedCount,
+                    joystickMode: saveManager.joystickMode,
+                    onJoystickModeChange: saveManager.setJoystickMode,
+                    playerSpeedSetting: saveManager.playerSpeedSetting,
+                    onPlayerSpeedSettingChange: saveManager.setPlayerSpeedSetting,
                     onStart: startGame
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
             case .playing:
-                GameView(seed: gameSeed) { result in
+                GameView(
+                    seed: gameSeed,
+                    joystickMode: saveManager.joystickMode,
+                    playerSpeedSetting: saveManager.playerSpeedSetting
+                ) { result in
                     didSetTimeRecord = result.survivalTime > saveManager.bestSurvivalTime
                     didSetDodgedRecord = result.dodgedCount > saveManager.bestDodgedCount
                     latestResult = result
@@ -113,7 +121,12 @@ private enum DebugLaunchOptions {
     static let autoStartGame = ProcessInfo.processInfo.environment["BULLETDODGE_AUTO_START"] == "1"
     static let initialPhase: AppPhase = showResult ? .result : (autoStartGame ? .playing : .home)
     static let previewResult: GameResult? = showResult
-        ? GameResult(survivalTime: 31.4, dodgedCount: 62, hitCount: 3)
+        ? GameResult(
+            survivalTime: 31.4,
+            dodgedCount: 62,
+            hitCount: 3,
+            playerSpeedSetting: .normal
+        )
         : nil
 }
 

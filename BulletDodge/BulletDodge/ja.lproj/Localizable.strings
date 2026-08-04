@@ -16,6 +16,21 @@
 "home.start" = "今すぐ挑戦";
 "home.start_hint" = "トゲ避けを開始";
 
+"settings.open" = "設定";
+"settings.close" = "設定を閉じる";
+"settings.title" = "設定";
+"settings.joystick_title" = "移動操作";
+"settings.joystick.fixed" = "固定スティック";
+"settings.joystick.fixed_description" = "左下の決まった位置から操作します。";
+"settings.joystick.floating" = "移動式スティック";
+"settings.joystick.floating_description" = "触れた場所にスティックが現れます。";
+"settings.speed_title" = "移動速度";
+"settings.speed.slow" = "低速";
+"settings.speed.normal" = "普通";
+"settings.speed.fast" = "高速";
+"settings.speed.ultraFast" = "超高速";
+"settings.selected" = "選択中";
+
 "update.title" = "アップデートがあります";
 "update.message" = "バージョン%@を利用できます。最新版にアップデートしますか？";
 "update.later" = "あとで";
@@ -43,17 +58,22 @@
 "stats.dodged" = "回避";
 "stats.hits" = "被弾";
 "stats.avoidance_rate" = "回避率";
+"stats.movement_speed" = "移動速度";
 "stats.rank" = "ランク";
 "stats.new" = "更新";
 
+"rank.ss.headline" = "極限を超えた";
+"rank.ss.message" = "二度のハイパーチャージを耐え切った。到達者だけの最高ランクだ。";
 "rank.s.headline" = "圧倒的な回避だ";
-"rank.s.message" = "弾幕の流れを完全に読み切った。次は自己ベストを更新しよう。";
+"rank.s.message" = "弾幕の流れを完全に読み切った。次はSSランクを狙おう。";
 "rank.a.headline" = "鋭い反応だった";
 "rank.a.message" = "鋭い反応だった。次は自己ベストを狙おう。";
 "rank.b.headline" = "いい動きだ";
 "rank.b.message" = "回避のリズムができてきた。次は視野を広く保ってみよう。";
 "rank.c.headline" = "次はもっと行ける";
 "rank.c.message" = "敵の予備動作を見れば軌道を先読みできる。もう一度挑戦しよう。";
+"rank.d.headline" = "ここから始まる";
+"rank.d.message" = "まずはトゲの軌道を見よう。動きを小さくすると避けやすい。";
 
 "accessibility.rank" = "ランク %@";
 "format.seconds_short" = "%.1f秒";
