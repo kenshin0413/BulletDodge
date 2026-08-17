@@ -28,17 +28,38 @@ struct GameView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .topTrailing) {
-                SpriteView(scene: scene, preferredFramesPerSecond: 120, options: [.ignoresSiblingOrder])
-                    .ignoresSafeArea()
+            let usesTabletBattleViewport = UIDevice.current.userInterfaceIdiom == .pad
+            let viewportSize = BattleViewport.size(
+                fitting: geometry.size,
+                usesTabletBattleViewport: usesTabletBattleViewport
+            )
+
+            ZStack {
+                Color.black
+
+                ZStack(alignment: .topTrailing) {
+                    SpriteView(
+                        scene: scene,
+                        preferredFramesPerSecond: 120,
+                        options: [.ignoresSiblingOrder]
+                    )
                     .background(Color.black)
 
-                if !hideHUD {
-                    survivalTimeHUD
-                        .padding(.top, geometry.safeAreaInsets.top + 10)
-                        .padding(.trailing, 12)
+                    if !hideHUD {
+                        survivalTimeHUD
+                            .padding(
+                                .top,
+                                usesTabletBattleViewport
+                                    ? 10
+                                    : geometry.safeAreaInsets.top + 10
+                            )
+                            .padding(.trailing, 12)
+                    }
                 }
+                .frame(width: viewportSize.width, height: viewportSize.height)
+                .clipped()
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase != .active {
                     scene.setPaused(true)
@@ -112,5 +133,37 @@ struct GameView: View {
         case "C": GameTheme.coral
         default: GameTheme.softText
         }
+    }
+}
+
+private enum BattleViewport {
+    /// Brawl-style tablet presentation: keep the authored battle projection in
+    /// a centered 16:9 viewport and letterbox the unused tablet height. The
+    /// scene camera preserves the iPhone render scale and crops only the sides,
+    /// while gameplay coordinates and collision logic remain device-independent.
+    private static let tabletAspectRatio: CGFloat = 16.0 / 9.0
+
+    static func size(
+        fitting containerSize: CGSize,
+        usesTabletBattleViewport: Bool
+    ) -> CGSize {
+        guard usesTabletBattleViewport,
+              containerSize.width > 0,
+              containerSize.height > 0 else {
+            return containerSize
+        }
+
+        let containerAspectRatio = containerSize.width / containerSize.height
+        if containerAspectRatio > tabletAspectRatio {
+            return CGSize(
+                width: containerSize.height * tabletAspectRatio,
+                height: containerSize.height
+            )
+        }
+
+        return CGSize(
+            width: containerSize.width,
+            height: containerSize.width / tabletAspectRatio
+        )
     }
 }

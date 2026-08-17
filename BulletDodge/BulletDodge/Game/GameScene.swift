@@ -1743,7 +1743,7 @@ final class GameScene: SKScene {
     }
 
     private func updateCameraPosition() {
-        let visibleHeight = GameConfig.cameraVisibleHeight
+        let visibleHeight = currentCameraVisibleHeight
         let distanceFromBottom = player.position.y - (playableRect.minY + GameConfig.playerCollisionRadius)
         let blendDistance = GameConfig.cameraBottomBlendDistanceTiles * GameConfig.tileSize
         let bottomBlend = max(0, min(1, 1 - distanceFromBottom / max(1, blendDistance)))
@@ -1968,8 +1968,8 @@ final class GameScene: SKScene {
     }
 
     private func constrainEnemyToUpperLane() {
-        let visibleWidth = size.width * currentCameraScaleX
-        let visibleHeight = size.height * currentCameraScaleY
+        let visibleWidth = gameplayReferenceVisibleWidth
+        let visibleHeight = gameplayReferenceVisibleHeight
         let laneRect = CGRect(
             x: player.position.x + visibleWidth * GameConfig.enemyAnchorHorizontalOffsetRatio - visibleWidth * GameConfig.enemyHorizontalLeashRatio,
             y: player.position.y + visibleHeight * GameConfig.enemyMinVerticalOffsetRatio,
@@ -1987,7 +1987,20 @@ final class GameScene: SKScene {
     }
 
     private var currentCameraScaleX: CGFloat {
-        guard size.width > 0 else { return 1 }
+        guard size.width > 0, size.height > 0 else { return 1 }
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // Match Brawl Stars' tablet framing: preserve the authored iPhone
+            // render scale, then let the narrower 16:9 tablet viewport crop
+            // equal amounts from the left and right. Using the tablet width as
+            // the scale reference would squeeze the complete iPhone view into
+            // 16:9 and alter the apparent depth and actor proportions.
+            let referenceAspectRatio = GameConfig.referenceBattlePixelSize.width
+                / GameConfig.referenceBattlePixelSize.height
+            let referenceSurfaceWidth = size.height * referenceAspectRatio
+            return GameConfig.cameraVisibleWidth / referenceSurfaceWidth
+        }
+
         return GameConfig.cameraVisibleWidth / size.width
     }
 
@@ -1996,9 +2009,24 @@ final class GameScene: SKScene {
         return GameConfig.cameraVisibleHeight / size.height
     }
 
+    private var currentCameraVisibleHeight: CGFloat {
+        GameConfig.cameraVisibleHeight
+    }
+
+    /// Camera cropping is presentation-only. Enemy steering, projectile
+    /// lifetime, and every gameplay calculation continue to use the same
+    /// device-independent logical view as the approved iPhone tuning.
+    private var gameplayReferenceVisibleWidth: CGFloat {
+        GameConfig.cameraVisibleWidth
+    }
+
+    private var gameplayReferenceVisibleHeight: CGFloat {
+        GameConfig.cameraVisibleHeight
+    }
+
     private var currentVisibleRect: CGRect {
-        let visibleWidth = size.width * currentCameraScaleX
-        let visibleHeight = size.height * currentCameraScaleY
+        let visibleWidth = gameplayReferenceVisibleWidth
+        let visibleHeight = gameplayReferenceVisibleHeight
         return CGRect(
             x: gameCamera.position.x - visibleWidth / 2,
             y: gameCamera.position.y - visibleHeight / 2,
@@ -2008,8 +2036,8 @@ final class GameScene: SKScene {
     }
 
     private func preferredEnemyAnchorPosition() -> CGPoint {
-        let visibleWidth = size.width * currentCameraScaleX
-        let visibleHeight = size.height * currentCameraScaleY
+        let visibleWidth = gameplayReferenceVisibleWidth
+        let visibleHeight = gameplayReferenceVisibleHeight
         let anchorPoint = CGPoint(
             x: enemyReferencePoint.x + visibleWidth * GameConfig.enemyAnchorHorizontalOffsetRatio,
             y: enemyReferencePoint.y + visibleHeight * GameConfig.enemyAnchorVerticalOffsetRatio

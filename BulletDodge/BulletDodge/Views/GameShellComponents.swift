@@ -12,6 +12,24 @@ enum GameTheme {
     static let softText = Color.white.opacity(0.68)
 }
 
+/// Fills every device edge with the authored artwork. Foreground controls keep
+/// their calibrated wide-screen composition, while the background may crop at
+/// the sides on a taller iPad display instead of introducing letterbox bands.
+struct AdaptiveLandscapeArtwork: View {
+    let imageName: String
+    let viewportSize: CGSize
+    let usesTabletComposition: Bool
+
+    var body: some View {
+        Image(imageName)
+            .resizable()
+            .scaledToFill()
+            .frame(width: viewportSize.width, height: viewportSize.height)
+            .clipped()
+            .accessibilityHidden(true)
+    }
+}
+
 struct ArenaShellBackground: View {
     let glowColor: Color
 
