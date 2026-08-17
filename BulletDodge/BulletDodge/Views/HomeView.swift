@@ -19,14 +19,17 @@ struct HomeView: View {
             let width = geometry.size.width
             let height = geometry.size.height
             let scale = min(width / 1846, height / 852)
+            let usesTabletComposition = UIDevice.current.userInterfaceIdiom == .pad
+            let contentOffsetY = usesTabletComposition
+                ? max(0, (height - 852 * scale) / 2)
+                : 0
 
             ZStack {
-                Image("home_hero_battle_aligned")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: width, height: height)
-                    .clipped()
-                    .accessibilityHidden(true)
+                AdaptiveLandscapeArtwork(
+                    imageName: "home_hero_battle_aligned",
+                    viewportSize: geometry.size,
+                    usesTabletComposition: usesTabletComposition
+                )
 
                 LinearGradient(
                     colors: [
@@ -41,15 +44,24 @@ struct HomeView: View {
 
                 brandLockup(scale: scale)
                     .frame(width: 760 * scale, alignment: .leading)
-                    .position(x: 515 * scale, y: 286 * scale)
+                    .position(
+                        x: 515 * scale,
+                        y: 286 * scale + contentOffsetY
+                    )
 
                 statsStrip(scale: scale)
                     .frame(width: 1040 * scale, height: 76 * scale)
-                    .position(x: 630 * scale, y: 742 * scale)
+                    .position(
+                        x: 630 * scale,
+                        y: 742 * scale + contentOffsetY
+                    )
 
                 startButton(scale: scale)
                     .frame(width: 540 * scale, height: 108 * scale)
-                    .position(x: 1470 * scale, y: 738 * scale)
+                    .position(
+                        x: 1470 * scale,
+                        y: 738 * scale + contentOffsetY
+                    )
 
                 settingsButton(scale: scale)
                     .frame(

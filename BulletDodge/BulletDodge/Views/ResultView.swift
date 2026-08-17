@@ -20,17 +20,30 @@ struct ResultView: View {
             let width = geometry.size.width
             let height = geometry.size.height
             let scale = min(width / 1846, height / 852)
+            let usesTabletComposition = UIDevice.current.userInterfaceIdiom == .pad
+            let contentOffsetY = usesTabletComposition
+                ? max(0, (height - 852 * scale) / 2)
+                : 0
 
             ZStack {
-                resultBackground(width: width, height: height)
+                resultBackground(
+                    size: geometry.size,
+                    usesTabletComposition: usesTabletComposition
+                )
 
                 identityColumn(scale: scale)
                     .frame(width: 520 * scale, height: 742 * scale)
-                    .position(x: 410 * scale, y: 422 * scale)
+                    .position(
+                        x: 410 * scale,
+                        y: 422 * scale + contentOffsetY
+                    )
 
                 performanceColumn(scale: scale)
                     .frame(width: 780 * scale, height: 730 * scale)
-                    .position(x: 1195 * scale, y: 414 * scale)
+                    .position(
+                        x: 1195 * scale,
+                        y: 414 * scale + contentOffsetY
+                    )
             }
             .frame(width: width, height: height)
             .clipped()
@@ -44,13 +57,15 @@ struct ResultView: View {
         }
     }
 
-    private func resultBackground(width: CGFloat, height: CGFloat) -> some View {
-        Image("result_ledger_opaque_bg")
-            .resizable()
-            .scaledToFill()
-            .frame(width: width, height: height)
-            .clipped()
-            .accessibilityHidden(true)
+    private func resultBackground(
+        size: CGSize,
+        usesTabletComposition: Bool
+    ) -> some View {
+        AdaptiveLandscapeArtwork(
+            imageName: "result_ledger_opaque_bg",
+            viewportSize: size,
+            usesTabletComposition: usesTabletComposition
+        )
         .allowsHitTesting(false)
     }
 

@@ -18,6 +18,13 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
         return true
     }
+
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        UIDevice.current.userInterfaceIdiom == .pad ? .all : .landscape
+    }
 }
 
 @main
@@ -25,8 +32,34 @@ struct BulletDodgeApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     var body: some Scene {
         WindowGroup {
-            LaunchFlowView()
+            FixedLandscapeCanvas {
+                LaunchFlowView()
+            }
         }
+    }
+}
+
+private struct FixedLandscapeCanvas<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let shouldRotate = UIDevice.current.userInterfaceIdiom == .pad
+                && geometry.size.height > geometry.size.width
+            let canvasSize = shouldRotate
+                ? CGSize(width: geometry.size.height, height: geometry.size.width)
+                : geometry.size
+
+            content
+                .frame(width: canvasSize.width, height: canvasSize.height)
+                .rotationEffect(.degrees(shouldRotate ? 90 : 0))
+                .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .ignoresSafeArea()
     }
 }
 
