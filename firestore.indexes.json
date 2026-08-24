@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "survivalMilliseconds", "order": "DESCENDING" },
+        { "fieldPath": "dodgedCount", "order": "DESCENDING" },
+        { "fieldPath": "achievedAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

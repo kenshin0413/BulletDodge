@@ -44,6 +44,12 @@ struct FragmentSpec {
     let keyframes: [ShardKeyframe]
 }
 
+struct ThornBurstPrediction {
+    let explosionPosition: CGPoint
+    let damagePosition: CGPoint
+    let shardGroundPaths: [[CGPoint]]
+}
+
 enum BulletOutcome {
     case active
     case expired
@@ -229,6 +235,79 @@ final class BulletNode: SKNode {
         SKTexture.preload([ballTexture, shardTexture, burstTexture]) { }
     }
 
+    /// Predicts the exact ground-plane paths used by the six shards before the
+    /// parent projectile reaches its fuse. The interpolation mirrors
+    /// `applyKeyframedMotion`, with extra samples so guide clearance is checked
+    /// against the curved path rather than only its authored keyframes.
+    static func burstPrediction(
+        spawnPosition: CGPoint,
+        direction: CGVector
+    ) -> ThornBurstPrediction {
+        let normalizedDirection = direction.normalized
+        let range = GameConfig.thornBallWorldRange(for: normalizedDirection)
+        let explosionPosition = CGPoint(
+            x: spawnPosition.x + normalizedDirection.dx * range,
+            y: spawnPosition.y + normalizedDirection.dy * range
+        )
+        let damagePosition = CGPoint(
+            x: explosionPosition.x + GameConfig.thornBallVisualDiameter * 0.05,
+            y: explosionPosition.y - GameConfig.thornBallVisualDiameter * 0.66
+        )
+        let groundOffset = CGPoint(
+            x: GameConfig.thornShardVisualLength * 0.05,
+            y: -GameConfig.thornShardVisualWidth * 0.78
+        )
+
+        let paths = shardBurstTemplates.map { template -> [CGPoint] in
+            let baseDirection = normalizedDirection.rotated(
+                by: template.angleDegrees * (.pi / 180)
+            )
+            var samples: [CGPoint] = []
+
+            for (from, to) in zip(template.keyframes, template.keyframes.dropFirst()) {
+                let sampleCount = max(2, Int(ceil((to.time - from.time) * 120)))
+                for index in 0..<sampleCount {
+                    let progress = CGFloat(index) / CGFloat(sampleCount)
+                    let radius = from.radius + (to.radius - from.radius) * progress
+                    let sweep = from.sweepDegrees
+                        + (to.sweepDegrees - from.sweepDegrees) * progress
+                    let radial = baseDirection.rotated(by: sweep * (.pi / 180))
+                    samples.append(
+                        CGPoint(
+                            x: explosionPosition.x
+                                + radial.dx * radius * shardHorizontalDisplacementScale
+                                + groundOffset.x,
+                            y: explosionPosition.y
+                                + radial.dy * radius * shardVerticalDisplacementScale
+                                + groundOffset.y
+                        )
+                    )
+                }
+            }
+
+            if let final = template.keyframes.last {
+                let radial = baseDirection.rotated(by: final.sweepDegrees * (.pi / 180))
+                samples.append(
+                    CGPoint(
+                        x: explosionPosition.x
+                            + radial.dx * final.radius * shardHorizontalDisplacementScale
+                            + groundOffset.x,
+                        y: explosionPosition.y
+                            + radial.dy * final.radius * shardVerticalDisplacementScale
+                            + groundOffset.y
+                    )
+                )
+            }
+            return samples
+        }
+
+        return ThornBurstPrediction(
+            explosionPosition: explosionPosition,
+            damagePosition: damagePosition,
+            shardGroundPaths: paths
+        )
+    }
+
     @discardableResult
     func update(deltaTime: TimeInterval) -> BulletOutcome {
         let groundContactPositionBeforeMovement = groundContactPosition
@@ -311,6 +390,17 @@ final class BulletNode: SKNode {
 
     var canDealContactDamage: Bool {
         lifetime >= collisionDelay
+    }
+
+    var isThornShard: Bool {
+        if case .thornShard = kind {
+            return true
+        }
+        return false
+    }
+
+    var groundContactWorldPosition: CGPoint {
+        groundContactPosition
     }
 
     func contactExplosionSpec() -> ExplosionSpec? {

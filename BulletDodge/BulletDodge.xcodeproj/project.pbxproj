@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		94D97AA430147436008B77E6 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 94D97AA330147436008B77E6 /* FirebaseAnalytics */; };
+		BDA1000430147436008B77E6 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = BDA1000330147436008B77E6 /* GoogleMobileAds */; };
+		BDFA000130147436008B77E6 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = BDFA001130147436008B77E6 /* FirebaseAuth */; };
+		BDFA000230147436008B77E6 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = BDFA001230147436008B77E6 /* FirebaseFirestore */; };
+		BDFA000330147436008B77E6 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = BDFA001330147436008B77E6 /* FirebaseAppCheck */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +32,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				94D97AA430147436008B77E6 /* FirebaseAnalytics in Frameworks */,
+				BDFA000130147436008B77E6 /* FirebaseAuth in Frameworks */,
+				BDFA000230147436008B77E6 /* FirebaseFirestore in Frameworks */,
+				BDFA000330147436008B77E6 /* FirebaseAppCheck in Frameworks */,
+				BDA1000430147436008B77E6 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +79,10 @@
 			name = BulletDodge;
 			packageProductDependencies = (
 				94D97AA330147436008B77E6 /* FirebaseAnalytics */,
+				BDFA001130147436008B77E6 /* FirebaseAuth */,
+				BDFA001230147436008B77E6 /* FirebaseFirestore */,
+				BDFA001330147436008B77E6 /* FirebaseAppCheck */,
+				BDA1000330147436008B77E6 /* GoogleMobileAds */,
 			);
 			productName = BulletDodge;
 			productReference = 941A1C662FFB7FAE00A1C46B /* BulletDodge.app */;
@@ -103,6 +115,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				94D97AA230147436008B77E6 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				BDA1000230147436008B77E6 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 941A1C672FFB7FAE00A1C46B /* Products */;
@@ -259,13 +272,16 @@
 		941A1C722FFB7FB000A1C46B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ADMOB_APP_ID = "ca-app-pub-3940256099942544~1458002511";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = BulletDodge/BulletDodge.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = WJNB26R5VS;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "トゲ避け";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -277,7 +293,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.kenshin.BulletDodge;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -297,13 +313,16 @@
 		941A1C732FFB7FB000A1C46B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ADMOB_APP_ID = "ca-app-pub-2277987033120510~9013465484";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = BulletDodge/BulletDodge.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = WJNB26R5VS;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "トゲ避け";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -315,7 +334,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.kenshin.BulletDodge;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -364,6 +383,14 @@
 				minimumVersion = 12.16.0;
 			};
 		};
+		BDA1000230147436008B77E6 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 13.7.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -371,6 +398,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 94D97AA230147436008B77E6 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseAnalytics;
+		};
+		BDA1000330147436008B77E6 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BDA1000230147436008B77E6 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+		BDFA001130147436008B77E6 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 94D97AA230147436008B77E6 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		BDFA001230147436008B77E6 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 94D97AA230147436008B77E6 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		BDFA001330147436008B77E6 /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 94D97AA230147436008B77E6 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

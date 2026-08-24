@@ -8,10 +8,24 @@
 import SwiftUI
 import FirebaseCore
 import FirebaseAnalytics
+import FirebaseAppCheck
+
+#if !DEBUG
+private final class ProductionAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+    func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
+        AppAttestProvider(app: app)
+    }
+}
+#endif
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+#if DEBUG
+        AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
+#else
+        AppCheck.setAppCheckProviderFactory(ProductionAppCheckProviderFactory())
+#endif
         FirebaseApp.configure()
 
         FirebaseApp.app()?.isDataCollectionDefaultEnabled = true
@@ -23,7 +37,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
     ) -> UIInterfaceOrientationMask {
-        UIDevice.current.userInterfaceIdiom == .pad ? .all : .landscape
+        .landscape
     }
 }
 
@@ -64,13 +78,14 @@ private struct FixedLandscapeCanvas<Content: View>: View {
 }
 
 private struct LaunchFlowView: View {
+    @StateObject private var advertisingConsentManager = AdvertisingConsentManager()
     @State private var isShowingSplash = !DebugSplashOptions.shouldSkip
 
     var body: some View {
         ZStack {
             // Keep the home screen ready behind the splash so its own fade can
             // reveal a fully laid-out screen without a blank or loading frame.
-            ContentView()
+            ContentView(advertisingConsentManager: advertisingConsentManager)
                 .allowsHitTesting(!isShowingSplash)
 
             if isShowingSplash {
@@ -82,6 +97,13 @@ private struct LaunchFlowView: View {
             }
         }
         .background(Color(red: 0.91, green: 0.85, blue: 0.73))
+        .task(id: isShowingSplash) {
+            guard !isShowingSplash else { return }
+#if DEBUG
+            guard ProcessInfo.processInfo.environment["BULLETDODGE_SKIP_ADS_SETUP"] != "1" else { return }
+#endif
+            await advertisingConsentManager.prepareForAds()
+        }
     }
 }
 

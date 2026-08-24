@@ -5,14 +5,18 @@ struct GameView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sessionStore: GameSessionStore
     @State private var scene: GameScene
+    private let gameMode: GameMode
     private let hideHUD = ProcessInfo.processInfo.environment["BULLETDODGE_HIDE_HUD"] == "1"
 
     init(
         seed: UUID,
         joystickMode: JoystickMode,
         playerSpeedSetting: PlayerSpeedSetting,
+        dodgeGuideEnabled: Bool,
+        gameMode: GameMode,
         onGameOver: @escaping (GameResult) -> Void
     ) {
+        self.gameMode = gameMode
         let store = GameSessionStore()
         _sessionStore = StateObject(wrappedValue: store)
         _scene = State(
@@ -20,6 +24,7 @@ struct GameView: View {
                 seed: seed,
                 joystickMode: joystickMode,
                 playerSpeedSetting: playerSpeedSetting,
+                dodgeGuideEnabled: dodgeGuideEnabled,
                 sessionStore: store,
                 onGameOver: onGameOver
             )
@@ -71,6 +76,12 @@ struct GameView: View {
 
     private var survivalTimeHUD: some View {
         HStack(spacing: 10) {
+            if gameMode == .ranked {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 16, weight: .black))
+                    .foregroundStyle(GameTheme.gold)
+                    .accessibilityLabel(L10n.text("ranking.mode"))
+            }
             Text(currentRankLetter)
                 .font(.system(
                     size: currentRankLetter == "SS" ? 15 : 20,

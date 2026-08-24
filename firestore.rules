@@ -1,0 +1,271 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function validName(value) {
+      return value is string
+        && value.size() >= 2
+        && value.size() <= 12
+        && value.matches('^[A-Za-z0-9ぁ-んァ-ヶ一-龯々ー]+$');
+    }
+
+    function validStandardIcon(value) {
+      return value in [
+        'crown', 'shield', 'curve', 'bolt', 'star', 'orbit',
+        'flame', 'diamond', 'target', 'heart', 'moon', 'paw'
+      ];
+    }
+
+    function validLimitedIcon(value) {
+      return value in [
+        'season_champion', 'season_champion_2', 'season_champion_3',
+        'season_champion_4', 'season_champion_5', 'developer_rainbow'
+      ];
+    }
+
+    function canUseIcon(uid, value) {
+      return validStandardIcon(value)
+        || (
+          validLimitedIcon(value)
+          && exists(/databases/$(database)/documents/profileRewards/$(uid))
+          && get(/databases/$(database)/documents/profileRewards/$(uid))
+            .data.unlockedIconIDs.hasAny([value])
+        );
+    }
+
+    // Seasons roll over at midnight on the first day of each month in Japan.
+    // Season 1 is August 2026. request.time is authoritative, so changing a
+    // device clock cannot submit a score to a closed or future season.
+    function jstNow() {
+      return request.time + duration.value(9, 'h');
+    }
+
+    function currentSeasonNumber() {
+      return (jstNow().year() - 2026) * 12 + jstNow().month() - 7;
+    }
+
+    function currentSeasonID() {
+      return 'v' + string(currentSeasonNumber());
+    }
+
+    function validCurrentSeason(data, seasonID) {
+      return currentSeasonNumber() >= 1
+        && seasonID == currentSeasonID()
+        && data.seasonNumber == currentSeasonNumber()
+        && data.seasonYear == jstNow().year()
+        && data.seasonMonth == jstNow().month();
+    }
+
+    function validProfile(uid) {
+      return request.resource.data.keys().hasOnly([
+          'uid', 'displayName', 'nameKey', 'iconID', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.uid == uid
+        && validName(request.resource.data.displayName)
+        && validName(request.resource.data.nameKey)
+        && canUseIcon(uid, request.resource.data.iconID)
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.nameKey)).data.ownerUid == uid;
+    }
+
+    match /profiles/{uid} {
+      allow get: if owns(uid);
+      allow list: if false;
+      allow create: if owns(uid)
+        && validProfile(uid)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if owns(uid)
+        && validProfile(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /usernames/{nameKey} {
+      allow read: if false;
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/usernames/$(nameKey))
+        && request.resource.data.keys().hasOnly(['ownerUid', 'createdAt'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && validName(nameKey);
+      allow update: if false;
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.nameKey != nameKey;
+    }
+
+    match /profileRewards/{uid} {
+      allow get: if owns(uid);
+      allow list, create, update, delete: if false;
+    }
+
+    match /rankingRuns/{uid} {
+      allow get: if owns(uid);
+      allow list, delete: if false;
+      allow create: if owns(uid)
+        && (
+          (
+            request.resource.data.keys().hasOnly([
+              'uid', 'ruleVersion', 'seasonNumber', 'seasonYear', 'seasonMonth',
+              'status', 'startedAt'
+            ])
+            && validCurrentSeason(request.resource.data, currentSeasonID())
+          ) || (
+            currentSeasonNumber() == 1
+            && request.resource.data.keys().hasOnly([
+              'uid', 'ruleVersion', 'status', 'startedAt'
+            ])
+          )
+        )
+        && request.resource.data.uid == uid
+        && request.resource.data.ruleVersion == 1
+        && request.resource.data.status == 'active'
+        && request.resource.data.startedAt == request.time;
+      allow update: if owns(uid) && (
+        (
+          resource.data.status == 'finished'
+          && (
+            (
+              request.resource.data.keys().hasOnly([
+                'uid', 'ruleVersion', 'seasonNumber', 'seasonYear', 'seasonMonth',
+                'status', 'startedAt'
+              ])
+              && validCurrentSeason(request.resource.data, currentSeasonID())
+            ) || (
+              currentSeasonNumber() == 1
+              && request.resource.data.keys().hasOnly([
+                'uid', 'ruleVersion', 'status', 'startedAt'
+              ])
+            )
+          )
+          && request.resource.data.uid == uid
+          && request.resource.data.ruleVersion == 1
+          && request.resource.data.status == 'active'
+          && request.resource.data.startedAt == request.time
+        ) || (
+          resource.data.status == 'active'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'finishedAt', 'survivalMilliseconds'
+          ])
+          && request.resource.data.status == 'finished'
+          && request.resource.data.finishedAt == request.time
+          && request.resource.data.survivalMilliseconds is int
+          && request.resource.data.survivalMilliseconds >= 0
+          && duration.value(request.resource.data.survivalMilliseconds, 'ms')
+            <= request.time - resource.data.startedAt + duration.value(5, 's')
+        )
+      );
+    }
+
+    match /leaderboards/{seasonID}/entries/{uid} {
+      allow get: if true;
+      allow list: if request.query.limit != null && request.query.limit <= 100;
+      allow create: if owns(uid)
+        && (
+          (
+            request.resource.data.keys().hasOnly([
+              'uid', 'displayName', 'iconID', 'survivalMilliseconds',
+              'dodgedCount', 'ruleVersion', 'seasonNumber', 'seasonYear',
+              'seasonMonth', 'achievedAt'
+            ])
+            && validCurrentSeason(request.resource.data, seasonID)
+          ) || (
+            currentSeasonNumber() == 1
+            && seasonID == 'v1'
+            && request.resource.data.keys().hasOnly([
+              'uid', 'displayName', 'iconID', 'survivalMilliseconds',
+              'dodgedCount', 'ruleVersion', 'achievedAt'
+            ])
+          )
+        )
+        && request.resource.data.uid == uid
+        && request.resource.data.ruleVersion == 1
+        && validName(request.resource.data.displayName)
+        && canUseIcon(uid, request.resource.data.iconID)
+        && request.resource.data.displayName
+          == get(/databases/$(database)/documents/profiles/$(uid)).data.displayName
+        && request.resource.data.iconID
+          == get(/databases/$(database)/documents/profiles/$(uid)).data.iconID
+        && request.resource.data.survivalMilliseconds is int
+        && request.resource.data.survivalMilliseconds >= 0
+        && request.resource.data.dodgedCount is int
+        && request.resource.data.dodgedCount >= 0
+        && request.resource.data.achievedAt == request.time
+        && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.status == 'active'
+        && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.ruleVersion == 1
+        && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.get('seasonNumber', 1)
+          == request.resource.data.get('seasonNumber', 1)
+        && duration.value(request.resource.data.survivalMilliseconds, 'ms')
+          <= request.time
+            - get(/databases/$(database)/documents/rankingRuns/$(uid)).data.startedAt
+            + duration.value(5, 's');
+      allow update: if owns(uid) && (
+        (
+          seasonID == currentSeasonID()
+          &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'displayName', 'iconID'
+          ])
+          && request.resource.data.displayName
+            == getAfter(/databases/$(database)/documents/profiles/$(uid)).data.displayName
+          && request.resource.data.iconID
+            == getAfter(/databases/$(database)/documents/profiles/$(uid)).data.iconID
+        ) || (
+          (
+            (
+              request.resource.data.keys().hasOnly([
+                'uid', 'displayName', 'iconID', 'survivalMilliseconds',
+                'dodgedCount', 'ruleVersion', 'seasonNumber', 'seasonYear',
+                'seasonMonth', 'achievedAt'
+              ])
+              && validCurrentSeason(request.resource.data, seasonID)
+            ) || (
+              currentSeasonNumber() == 1
+              && seasonID == 'v1'
+              && request.resource.data.keys().hasOnly([
+                'uid', 'displayName', 'iconID', 'survivalMilliseconds',
+                'dodgedCount', 'ruleVersion', 'achievedAt'
+              ])
+            )
+          )
+          && request.resource.data.uid == uid
+          && request.resource.data.ruleVersion == 1
+          && validName(request.resource.data.displayName)
+          && canUseIcon(uid, request.resource.data.iconID)
+          && request.resource.data.displayName
+            == get(/databases/$(database)/documents/profiles/$(uid)).data.displayName
+          && request.resource.data.iconID
+            == get(/databases/$(database)/documents/profiles/$(uid)).data.iconID
+          && request.resource.data.survivalMilliseconds is int
+          && request.resource.data.survivalMilliseconds >= 0
+          && request.resource.data.dodgedCount is int
+          && request.resource.data.dodgedCount >= 0
+          && request.resource.data.achievedAt == request.time
+          && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.status == 'active'
+          && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.ruleVersion == 1
+          && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.get('seasonNumber', 1)
+            == request.resource.data.get('seasonNumber', 1)
+          && duration.value(request.resource.data.survivalMilliseconds, 'ms')
+            <= request.time
+              - get(/databases/$(database)/documents/rankingRuns/$(uid)).data.startedAt
+              + duration.value(5, 's')
+          && request.resource.data.survivalMilliseconds > resource.data.survivalMilliseconds
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

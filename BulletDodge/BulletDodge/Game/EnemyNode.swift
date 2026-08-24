@@ -2,6 +2,7 @@ import SceneKit
 import SpriteKit
 
 final class EnemyNode: SKNode {
+    private let randomSource: SeededRandomSource
     private enum MovementMode {
         case orbiting
         case approaching
@@ -66,7 +67,8 @@ final class EnemyNode: SKNode {
     private var facingAngle: CGFloat = 0
     private var attackFacingLockTimer: TimeInterval = 0
 
-    override init() {
+    init(randomSource: SeededRandomSource) {
+        self.randomSource = randomSource
         super.init()
 
         configureGroundIndicator()
@@ -122,7 +124,7 @@ final class EnemyNode: SKNode {
         reloadTimer = 0
         nextFireTimer = GameConfig.autoAttackTestEnabled
             ? GameConfig.autoAttackInitialFireDelay
-            : TimeInterval.random(in: GameConfig.enemyInitialAttackDelayRange)
+            : randomSource.timeInterval(in: GameConfig.enemyInitialAttackDelayRange)
         throwReleaseTimer = 0
         isThrowQueued = false
         burstShotsRemaining = 0
@@ -182,8 +184,9 @@ final class EnemyNode: SKNode {
             dx: -fromPlayer.dx,
             dy: -fromPlayer.dy
         )
-        currentAttackPositionDistance =
-            GameConfig.enemyThornAttackPositionDistance(for: projectileDirection)
+        currentAttackPositionDistance = isWallRecoveryActive
+            ? GameConfig.enemyWallRecoveryAttackPositionDistance(for: projectileDirection)
+            : GameConfig.enemyThornAttackPositionDistance(for: projectileDirection)
         if movementMode == .retreating,
            currentPlayerDistance >= GameConfig.enemyRetreatCompletionDistance {
             finishRetreat()
@@ -248,19 +251,11 @@ final class EnemyNode: SKNode {
                 dx: mapSafeRect.midX - playerPosition.x,
                 dy: mapSafeRect.midY - playerPosition.y
             ).normalized
-            let projectileDirection = CGVector(
-                dx: -towardArenaInterior.dx,
-                dy: -towardArenaInterior.dy
-            )
             targetPoint = CGPoint(
                 x: playerPosition.x
-                    + towardArenaInterior.dx * GameConfig.enemyThornAttackPositionDistance(
-                        for: projectileDirection
-                    ),
+                    + towardArenaInterior.dx * currentAttackPositionDistance,
                 y: playerPosition.y
-                    + towardArenaInterior.dy * GameConfig.enemyThornAttackPositionDistance(
-                        for: projectileDirection
-                    )
+                    + towardArenaInterior.dy * currentAttackPositionDistance
             ).clamped(in: mapSafeRect)
             if isWallRecoveryActive {
                 let recoveryDistance = CGPoint.distance(from: position, to: targetPoint)
@@ -364,7 +359,7 @@ final class EnemyNode: SKNode {
         } else {
             nextFireTimer = max(
                 nextFireTimer,
-                TimeInterval.random(in: GameConfig.enemyApproachAttackDelayRange)
+                randomSource.timeInterval(in: GameConfig.enemyApproachAttackDelayRange)
             )
             chooseNewBias()
         }
@@ -439,13 +434,13 @@ final class EnemyNode: SKNode {
             burstShotsRemaining = 0
             nextFireTimer = GameConfig.autoAttackRepeatFireDelay
         } else if burstShotsRemaining > 0 {
-            nextFireTimer = TimeInterval.random(in: GameConfig.enemyBurstShotDelayRange)
+            nextFireTimer = randomSource.timeInterval(in: GameConfig.enemyBurstShotDelayRange)
         } else if isWallRecoveryActive {
-            nextFireTimer = TimeInterval.random(
+            nextFireTimer = randomSource.timeInterval(
                 in: GameConfig.enemyWallRecoveryAttackIntervalRange
             )
         } else {
-            nextFireTimer = TimeInterval.random(in: GameConfig.enemyAttackIntervalRange)
+            nextFireTimer = randomSource.timeInterval(in: GameConfig.enemyAttackIntervalRange)
         }
         throwReleaseTimer = GameConfig.enemyThrowReleaseTime
         isThrowQueued = true
@@ -477,13 +472,12 @@ final class EnemyNode: SKNode {
             activeAimStyles = [.direct]
             if activeBurstSize > 1 {
                 activeAimStyles.append(
-                    contentsOf: Array([AimStyle.smallOffset, .largeOffset]
-                        .shuffled()
+                    contentsOf: Array(randomSource.shuffled([AimStyle.smallOffset, .largeOffset])
                         .prefix(activeBurstSize - 1))
                 )
             }
         } else {
-            activeAimStyles = Array(AimStyle.allCases.shuffled().prefix(activeBurstSize))
+            activeAimStyles = Array(randomSource.shuffled(AimStyle.allCases).prefix(activeBurstSize))
         }
     }
 
@@ -491,7 +485,7 @@ final class EnemyNode: SKNode {
         let totalWeight = GameConfig.enemySingleShotWeight
             + GameConfig.enemyDoubleShotWeight
             + GameConfig.enemyTripleShotWeight
-        let roll = Int.random(in: 0..<totalWeight)
+        let roll = randomSource.int(in: 0..<totalWeight)
         if roll < GameConfig.enemySingleShotWeight {
             return 1
         }
@@ -512,14 +506,14 @@ final class EnemyNode: SKNode {
         }
 
         let baseRange = GameConfig.mapSize.width * GameConfig.enemyHorizontalDriftRangeRatio
-        targetLateralBias = CGFloat.random(in: -baseRange...baseRange)
-        targetVerticalBias = CGFloat.random(in: GameConfig.enemyVerticalDriftRange)
+        targetLateralBias = randomSource.cgFloat(in: -baseRange...baseRange)
+        targetVerticalBias = randomSource.cgFloat(in: GameConfig.enemyVerticalDriftRange)
         let canStartApproach = !isThrowQueued && burstShotsRemaining == 0
-        if canStartApproach, CGFloat.random(in: 0...1) < GameConfig.enemyApproachChance {
+        if canStartApproach, randomSource.cgFloat(in: 0...1) < GameConfig.enemyApproachChance {
             movementMode = .approaching
             nextFireTimer = min(
                 nextFireTimer,
-                TimeInterval.random(in: GameConfig.enemyApproachAttackDelayRange)
+                randomSource.timeInterval(in: GameConfig.enemyApproachAttackDelayRange)
             )
         } else {
             movementMode = .orbiting
@@ -536,13 +530,13 @@ final class EnemyNode: SKNode {
 
     private func finishRetreat() {
         movementMode = .orbiting
-        targetVerticalBias = CGFloat.random(in: (GameConfig.tileSize * 0.15)...(GameConfig.tileSize * 1.0))
+        targetVerticalBias = randomSource.cgFloat(in: (GameConfig.tileSize * 0.15)...(GameConfig.tileSize * 1.0))
         chooseNewBias()
     }
 
     private func chooseNewBias() {
         decisionTimer = 0
-        decisionDuration = TimeInterval.random(in: GameConfig.enemyDecisionDurationRange)
+        decisionDuration = randomSource.timeInterval(in: GameConfig.enemyDecisionDurationRange)
     }
 
     private func rotatedAngle(from current: CGFloat, toward target: CGFloat, maxStep: CGFloat) -> CGFloat {
