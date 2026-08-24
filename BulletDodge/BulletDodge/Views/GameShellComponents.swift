@@ -21,12 +21,21 @@ struct AdaptiveLandscapeArtwork: View {
     let usesTabletComposition: Bool
 
     var body: some View {
-        Image(imageName)
-            .resizable()
-            .scaledToFill()
-            .frame(width: viewportSize.width, height: viewportSize.height)
-            .clipped()
-            .accessibilityHidden(true)
+        ZStack {
+            // Asset decoding can briefly fail on memory-constrained devices
+            // (notably the iPhone SE simulator). Keep an artwork-toned fallback
+            // behind the image so the home screen can never flash solid white.
+            Color(red: 0.46, green: 0.40, blue: 0.30)
+
+            Image(imageName)
+                .resizable()
+                .scaledToFill()
+                .frame(width: viewportSize.width, height: viewportSize.height)
+                .clipped()
+        }
+        .frame(width: viewportSize.width, height: viewportSize.height)
+        .clipped()
+        .accessibilityHidden(true)
     }
 }
 

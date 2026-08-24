@@ -63,6 +63,14 @@ fastlane/test_output
 
 # Xcode local artifacts
 DerivedData/
+BulletDodge/.derived-data-log-*
+
+# Local design QA artifacts and recoverable backups
+DesignPreviews/
+auto-attack-captures/
+backups/
+design-qa.md
+responsive-ui-audit-*.md
 
 # macOS
 .DS_Store

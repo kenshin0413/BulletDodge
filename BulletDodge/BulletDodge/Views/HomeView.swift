@@ -7,6 +7,15 @@ struct HomeView: View {
     let onJoystickModeChange: (JoystickMode) -> Void
     let playerSpeedSetting: PlayerSpeedSetting
     let onPlayerSpeedSettingChange: (PlayerSpeedSetting) -> Void
+    let dodgeGuideEnabled: Bool
+    let onDodgeGuideEnabledChange: (Bool) -> Void
+    let isPrivacyOptionsRequired: Bool
+    let onShowPrivacyOptions: () -> Void
+    let rankingProfile: RankingProfile?
+    let rankedRunsRemaining: Int
+    let onShowAccount: () -> Void
+    let onShowLeaderboard: () -> Void
+    let onStartRanked: () -> Void
     let onStart: () -> Void
 
     @State private var appeared = false
@@ -23,6 +32,14 @@ struct HomeView: View {
             let contentOffsetY = usesTabletComposition
                 ? max(0, (height - 852 * scale) / 2)
                 : 0
+            let bottomRowY = height - 110 * scale
+            let topControlDiameter = max(44, 82 * scale)
+            let topControlStep = max(topControlDiameter + 4, 114 * scale)
+            let topControlInset = max(42, 114 * scale)
+            let topControlY = max(40, 93 * scale)
+            let settingsCenterX = width - topControlInset
+            let leaderboardCenterX = width - topControlInset - topControlStep
+            let accountCenterX = width - topControlInset - topControlStep * 2
 
             ZStack {
                 AdaptiveLandscapeArtwork(
@@ -50,27 +67,49 @@ struct HomeView: View {
                     )
 
                 statsStrip(scale: scale)
-                    .frame(width: 1040 * scale, height: 76 * scale)
+                    .frame(width: 930 * scale, height: 76 * scale)
                     .position(
-                        x: 630 * scale,
-                        y: 742 * scale + contentOffsetY
+                        x: 575 * scale,
+                        y: bottomRowY
                     )
 
-                startButton(scale: scale)
-                    .frame(width: 540 * scale, height: 108 * scale)
+                battleButtons(scale: scale)
+                    .frame(width: 720 * scale, height: 92 * scale)
                     .position(
-                        x: 1470 * scale,
-                        y: 738 * scale + contentOffsetY
+                        x: 1415 * scale,
+                        y: bottomRowY
                     )
 
                 settingsButton(scale: scale)
                     .frame(
-                        width: max(44, 82 * scale),
-                        height: max(44, 82 * scale)
+                        width: topControlDiameter,
+                        height: topControlDiameter
                     )
                     .position(
-                        x: width - max(54, 80 * scale),
-                        y: max(44, 70 * scale)
+                        x: settingsCenterX,
+                        y: topControlY
+                    )
+                    .zIndex(3)
+
+                leaderboardButton(scale: scale)
+                    .frame(
+                        width: topControlDiameter,
+                        height: topControlDiameter
+                    )
+                    .position(
+                        x: leaderboardCenterX,
+                        y: topControlY
+                    )
+                    .zIndex(3)
+
+                accountButton(scale: scale)
+                    .frame(
+                        width: topControlDiameter,
+                        height: topControlDiameter
+                    )
+                    .position(
+                        x: accountCenterX,
+                        y: topControlY
                     )
                     .zIndex(3)
 
@@ -213,6 +252,8 @@ struct HomeView: View {
                 .font(.system(size: 23 * scale, weight: .bold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .allowsTightening(true)
 
             Text(value)
                 .font(.system(size: 36 * scale, weight: .black, design: .rounded))
@@ -262,6 +303,134 @@ struct HomeView: View {
         .accessibilityHint(L10n.text("home.start_hint"))
     }
 
+    private func battleButtons(scale: CGFloat) -> some View {
+        HStack(spacing: 16 * scale) {
+            Button(action: onStart) {
+                HStack(spacing: 14 * scale) {
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 25 * scale, weight: .black))
+                        .frame(width: 48 * scale, height: 48 * scale)
+                        .background(.black.opacity(0.10), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 2 * scale) {
+                        Text(L10n.text("home.practice_battle"))
+                            .font(.system(size: 25 * scale, weight: .black, design: .rounded))
+                        Text(L10n.text("home.practice_subtitle"))
+                            .font(.system(size: 13 * scale, weight: .bold, design: .rounded))
+                            .foregroundStyle(.black.opacity(0.60))
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+
+                    Spacer(minLength: 5 * scale)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 19 * scale, weight: .black))
+                        .frame(width: 36 * scale, height: 36 * scale)
+                        .background(.black.opacity(0.10), in: Circle())
+                }
+                .foregroundStyle(Color(red: 0.07, green: 0.055, blue: 0.04))
+                .padding(.horizontal, 17 * scale)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
+                            .fill(.black.opacity(0.32))
+                            .offset(y: 5 * scale)
+                        RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(red: 1.00, green: 0.87, blue: 0.40), Color(red: 0.95, green: 0.65, blue: 0.14)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
+                        .stroke(Color.black.opacity(0.72), lineWidth: 2.5 * scale)
+                        .padding(2 * scale)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20 * scale, style: .continuous)
+                        .stroke(.white.opacity(0.34), lineWidth: 1.2 * scale)
+                        .padding(7 * scale)
+                }
+                .shadow(color: .black.opacity(0.24), radius: 8 * scale, y: 5 * scale)
+            }
+            .buttonStyle(HomePressButtonStyle())
+            .accessibilityHint(L10n.text("home.start_hint"))
+
+            Button(action: onStartRanked) {
+                HStack(spacing: 14 * scale) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 24 * scale, weight: .black))
+                        .foregroundStyle(GameTheme.gold)
+                        .frame(width: 48 * scale, height: 48 * scale)
+                        .background(.black.opacity(0.18), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 1 * scale) {
+                        Text(L10n.text("ranking.play_short"))
+                            .font(.system(size: 25 * scale, weight: .black, design: .rounded))
+                        Text(L10n.text("home.ranked_subtitle"))
+                            .font(.system(size: 13 * scale, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.72))
+                        Text(
+                            rankedRunsRemaining > 0
+                                ? L10n.format("ranking.reward.remaining", rankedRunsRemaining)
+                                : L10n.text("ranking.reward.ad_required_short")
+                        )
+                            .font(.system(size: 14 * scale, weight: .black, design: .rounded))
+                            .foregroundStyle(rankedRunsRemaining > 0 ? GameTheme.gold : GameTheme.coral)
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+
+                    Spacer(minLength: 5 * scale)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 19 * scale, weight: .black))
+                        .foregroundStyle(GameTheme.gold)
+                        .frame(width: 36 * scale, height: 36 * scale)
+                        .background(.black.opacity(0.18), in: Circle())
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 17 * scale)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
+                            .fill(.black.opacity(0.38))
+                            .offset(y: 5 * scale)
+                        RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(red: 0.05, green: 0.54, blue: 0.62), Color(red: 0.01, green: 0.27, blue: 0.34)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
+                        .stroke(.black.opacity(0.76), lineWidth: 2.5 * scale)
+                        .padding(2 * scale)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20 * scale, style: .continuous)
+                        .stroke(GameTheme.gold.opacity(0.42), lineWidth: 1.2 * scale)
+                        .padding(7 * scale)
+                }
+                .shadow(color: .black.opacity(0.28), radius: 8 * scale, y: 5 * scale)
+            }
+            .buttonStyle(HomePressButtonStyle())
+        }
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared ? 0 : 16 * scale)
+    }
+
     private func settingsButton(scale: CGFloat) -> some View {
         Button {
             isShowingSettings = true
@@ -280,6 +449,47 @@ struct HomeView: View {
         }
         .buttonStyle(HomePressButtonStyle())
         .accessibilityLabel(L10n.text("settings.open"))
+    }
+
+    private func leaderboardButton(scale: CGFloat) -> some View {
+        Button(action: onShowLeaderboard) {
+            Image(systemName: "trophy.fill")
+                .font(.system(size: max(19, 30 * scale), weight: .black))
+                .foregroundStyle(GameTheme.gold)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.70), in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(GameTheme.gold.opacity(0.88), lineWidth: max(1.5, 2.5 * scale))
+                        .padding(2 * scale)
+                }
+                .shadow(color: .black.opacity(0.32), radius: 6 * scale, y: 3 * scale)
+        }
+        .buttonStyle(HomePressButtonStyle())
+        .accessibilityLabel(L10n.text("ranking.open"))
+    }
+
+    private func accountButton(scale: CGFloat) -> some View {
+        Button(action: onShowAccount) {
+            ZStack {
+                Circle().fill(Color.black.opacity(0.70))
+                if let profile = rankingProfile {
+                    RankingIconView(icon: profile.icon, size: max(40, 70 * scale))
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: max(19, 30 * scale), weight: .black))
+                        .foregroundStyle(GameTheme.cyan)
+                }
+            }
+            .overlay {
+                Circle()
+                    .stroke(GameTheme.cyan.opacity(0.88), lineWidth: max(1.5, 2.5 * scale))
+                    .padding(2 * scale)
+            }
+            .shadow(color: .black.opacity(0.32), radius: 6 * scale, y: 3 * scale)
+        }
+        .buttonStyle(HomePressButtonStyle())
+        .accessibilityLabel(L10n.text("account.open"))
     }
 
     private func settingsOverlay(
@@ -316,6 +526,31 @@ struct HomeView: View {
 
                     Spacer(minLength: 8 * scale)
 
+                    if isPrivacyOptionsRequired {
+                        Button(action: onShowPrivacyOptions) {
+                            HStack(spacing: 6 * scale) {
+                                Image(systemName: "hand.raised.fill")
+                                Text(L10n.text("settings.privacy_options"))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.72)
+                            }
+                            .font(.system(
+                                size: max(10, 18 * scale),
+                                weight: .black,
+                                design: .rounded
+                            ))
+                            .foregroundStyle(Color(red: 0.14, green: 0.11, blue: 0.07))
+                            .padding(.horizontal, 12 * scale)
+                            .frame(minHeight: max(34, 48 * scale))
+                            .background(Color.white.opacity(0.34), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(GameTheme.gold.opacity(0.56), lineWidth: max(1, 2 * scale))
+                            }
+                        }
+                        .buttonStyle(HomePressButtonStyle())
+                    }
+
                     Button {
                         isShowingSettings = false
                     } label: {
@@ -344,12 +579,14 @@ struct HomeView: View {
                 }
 
                 playerSpeedSelector(scale: scale)
+
+                dodgeGuideToggle(scale: scale)
             }
             .padding(.horizontal, 34 * scale)
             .padding(.vertical, 26 * scale)
             .frame(
                 width: min(width - 28, 980 * scale),
-                height: min(height - 24, 650 * scale)
+                height: min(height - 24, 700 * scale)
             )
             .background(
                 Color(red: 0.93, green: 0.88, blue: 0.76),
@@ -510,6 +747,59 @@ struct HomeView: View {
         )
     }
 
+    private func dodgeGuideToggle(scale: CGFloat) -> some View {
+        HStack(spacing: 13 * scale) {
+            Image(systemName: "scope")
+                .font(.system(size: max(16, 27 * scale), weight: .black))
+                .foregroundStyle(GameTheme.cyan)
+                .frame(width: max(28, 42 * scale))
+
+            VStack(alignment: .leading, spacing: 2 * scale) {
+                Text(L10n.text("settings.dodge_guide_title"))
+                    .font(.system(
+                        size: max(12, 22 * scale),
+                        weight: .black,
+                        design: .rounded
+                    ))
+                    .foregroundStyle(Color(red: 0.14, green: 0.11, blue: 0.07))
+
+                Text(L10n.text("settings.dodge_guide_description"))
+                    .font(.system(
+                        size: max(9, 16 * scale),
+                        weight: .semibold,
+                        design: .rounded
+                    ))
+                    .foregroundStyle(Color.black.opacity(0.58))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            Spacer(minLength: 4 * scale)
+
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { dodgeGuideEnabled },
+                    set: onDodgeGuideEnabledChange
+                )
+            )
+            .labelsHidden()
+            .tint(GameTheme.cyan)
+            .scaleEffect(max(0.82, min(1.12, scale)))
+            .accessibilityLabel(L10n.text("settings.dodge_guide_title"))
+        }
+        .padding(.horizontal, 18 * scale)
+        .frame(minHeight: max(48, 70 * scale))
+        .background(
+            Color.white.opacity(0.30),
+            in: RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18 * scale, style: .continuous)
+                .stroke(GameTheme.gold.opacity(0.42), lineWidth: max(1, 2 * scale))
+        }
+    }
+
     private var formattedBestTime: String {
         guard bestSurvivalTime > 0 else { return "—" }
         return L10n.format("format.seconds_short", bestSurvivalTime)
@@ -557,6 +847,15 @@ private struct HomePressButtonStyle: ButtonStyle {
         onJoystickModeChange: { _ in },
         playerSpeedSetting: .normal,
         onPlayerSpeedSettingChange: { _ in },
+        dodgeGuideEnabled: true,
+        onDodgeGuideEnabledChange: { _ in },
+        isPrivacyOptionsRequired: true,
+        onShowPrivacyOptions: {},
+        rankingProfile: nil,
+        rankedRunsRemaining: 3,
+        onShowAccount: {},
+        onShowLeaderboard: {},
+        onStartRanked: {},
         onStart: {}
     )
         .frame(width: 932, height: 430)

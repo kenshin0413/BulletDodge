@@ -202,6 +202,10 @@ enum GameConfig {
     static let enemyWallRecoveryArrivalDistance: CGFloat = tileSize * 0.35
     static let enemyWallRecoveryArrivalAttackDelay: TimeInterval = 0.65
     static let enemyWallRecoveryAttackIntervalRange: ClosedRange<TimeInterval> = 1.4...2.4
+    // When the player camps on the near wall, close the standoff so the main
+    // ball bursts near that wall instead of letting outward thorns expire
+    // harmlessly before they can apply pressure.
+    static let enemyWallRecoveryForwardCrossingDistance: CGFloat = 40
     static let enemyBobAmplitude: CGFloat = 3
     static let enemyBobSpeed: CGFloat = 0.72
     static let enemyReferenceFollowRate: CGFloat = 1.15
@@ -317,6 +321,10 @@ enum GameConfig {
     // to roughly 1.25 mm. It is a ground-plane circle around the shard shadow,
     // not a percentage of the visible triangular artwork.
     static let thornShardContactRadius: CGFloat = 1.25 * targetPointsPerMillimeter
+    // Let the artwork visibly pass the movement wall before removing it. Hit
+    // detection still runs first and continues to use the unchanged gameplay
+    // collision core.
+    static let thornShardWallOverflowAllowance: CGFloat = thornShardVisualLength * 0.75
     static let thornShardCurveDelay: TimeInterval = 0.0
     static let thornShardAngularVelocity: CGFloat = 0.08
     static let thornShardCollisionDelay: TimeInterval = 0.07
@@ -410,5 +418,12 @@ enum GameConfig {
             + thornBallSpawnInset
             + thornBallWorldRange(for: direction)
             + thornShardForwardCrossingDistance
+    }
+
+    static func enemyWallRecoveryAttackPositionDistance(for direction: CGVector) -> CGFloat {
+        enemyVisualRadius
+            + thornBallSpawnInset
+            + thornBallWorldRange(for: direction)
+            + enemyWallRecoveryForwardCrossingDistance
     }
 }

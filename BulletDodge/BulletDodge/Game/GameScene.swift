@@ -8,6 +8,20 @@ final class GameScene: SKScene {
         let coreNode: SKNode
     }
 
+    private struct DodgeGuide {
+        let sourceID: ObjectIdentifier
+        let container: SKNode
+        let variant: ThornAttackVariant
+        var elapsed: TimeInterval = 0
+    }
+
+    private struct DodgeGuidePalette {
+        let haloFill: UIColor
+        let haloStroke: UIColor
+        let dotFill: UIColor
+        let dotStroke: UIColor
+    }
+
     private enum AutoWallPhase: CaseIterable {
         case bottomCenter
         case bottomLeft
@@ -49,6 +63,9 @@ final class GameScene: SKScene {
     private let hideDebugHUD = ProcessInfo.processInfo.environment["BULLETDODGE_HIDE_HUD"] == "1"
     private let autoWallTest = ProcessInfo.processInfo.environment["BULLETDODGE_AUTO_WALL_TEST"] == "1"
     private let autoAttackTest = ProcessInfo.processInfo.environment["BULLETDODGE_AUTO_ATTACK_TEST"] == "1"
+    private let bottomGuideSweepTest = ProcessInfo.processInfo.environment[
+        "BULLETDODGE_BOTTOM_GUIDE_SWEEP_TEST"
+    ] == "1"
     private let autoWallCapture = ProcessInfo.processInfo.environment["BULLETDODGE_AUTO_WALL_CAPTURE"] == "1"
     private let autoAttackCapture = ProcessInfo.processInfo.environment["BULLETDODGE_AUTO_ATTACK_CAPTURE"] == "1"
     private let sessionStore: GameSessionStore
@@ -56,10 +73,12 @@ final class GameScene: SKScene {
 
     private let mapNode = SKShapeNode(rectOf: GameConfig.mapSize, cornerRadius: 0)
     private let player = PlayerNode()
-    private let enemy = EnemyNode()
+    private let randomSource: SeededRandomSource
+    private let enemy: EnemyNode
     private let joystick: VirtualJoystick
     private let playerSpeedSetting: PlayerSpeedSetting
     private let playerMovementSpeed: CGFloat
+    private let dodgeGuideEnabled: Bool
     private let gameCamera = SKCameraNode()
     private let ammoIndicator = SKNode()
     private let hyperchargeAura = SKNode()
@@ -75,6 +94,7 @@ final class GameScene: SKScene {
     private var bullets: [BulletNode] = []
     private var lastUpdateTime: TimeInterval = 0
     private var survivalTime: TimeInterval = 0
+    private var hasStartedSurvivalTimer = false
     private var dodgedCount = 0
     private var hitCount = 0
     private var gameEnded = false
@@ -84,11 +104,14 @@ final class GameScene: SKScene {
     private var queuedEnemyTargetPoint: CGPoint?
     private var queuedEnemyAttackVariant: ThornAttackVariant?
     private var pendingHyperchargeExplosions: [PendingHyperchargeExplosion] = []
+    private var dodgeGuides: [DodgeGuide] = []
+    private var nextDodgeGuidePaletteIndex = 0
     private var isHyperchargeActive = false
     private var isWallPressureRecoveryActive = false
     private var autoWallPhase: AutoWallPhase = .bottomCenter
     private var autoWallHoldTimeRemaining: TimeInterval = 0
     private var autoWallLogTimer: TimeInterval = 0
+    private var bottomGuideSweepDirection: CGFloat = 1
     private let autoWallLogFileName = "auto-wall.log"
     private var capturedAutoWallPhases = Set<AutoWallPhase>()
     private let autoAttackLogFileName = "auto-attack.log"
@@ -126,11 +149,16 @@ final class GameScene: SKScene {
         seed: UUID,
         joystickMode: JoystickMode,
         playerSpeedSetting: PlayerSpeedSetting,
+        dodgeGuideEnabled: Bool,
         sessionStore: GameSessionStore,
         onGameOver: @escaping (GameResult) -> Void
     ) {
+        let randomSource = SeededRandomSource(seed: seed)
+        self.randomSource = randomSource
+        enemy = EnemyNode(randomSource: randomSource)
         joystick = VirtualJoystick(mode: joystickMode)
         self.playerSpeedSetting = playerSpeedSetting
+        self.dodgeGuideEnabled = dodgeGuideEnabled
         playerMovementSpeed = switch playerSpeedSetting {
         case .slow:
             GameConfig.slowPlayerSpeed
@@ -182,7 +210,9 @@ final class GameScene: SKScene {
         let deltaTime = min(max(currentTime - lastUpdateTime, 0), 1.0 / 60.0)
         lastUpdateTime = currentTime
 
-        survivalTime += deltaTime
+        if hasStartedSurvivalTimer {
+            survivalTime += deltaTime
+        }
         updateHyperchargeState()
         player.applyMovement(
             input: currentMovementInput,
@@ -191,6 +221,18 @@ final class GameScene: SKScene {
             movementSpeed: playerMovementSpeed
         )
         player.position = constrainedArenaPosition(player.position, collisionRadius: GameConfig.playerCollisionRadius)
+        if bottomGuideSweepTest {
+            let margin = GameConfig.playerCollisionRadius
+            let left = playableRect.minX + margin
+            let right = playableRect.maxX - margin
+            if player.position.x >= right - 0.5, bottomGuideSweepDirection > 0 {
+                bottomGuideSweepDirection = -1
+                print("DODGE GUIDE SWEEP reached=right")
+            } else if player.position.x <= left + 0.5, bottomGuideSweepDirection < 0 {
+                bottomGuideSweepDirection = 1
+                print("DODGE GUIDE SWEEP reached=left")
+            }
+        }
         if autoWallTest {
             updateAutoWallRoute(deltaTime: deltaTime)
         }
@@ -219,6 +261,7 @@ final class GameScene: SKScene {
             case .none:
                 break
             case .beganThrow(let shotContext):
+                hasStartedSurvivalTimer = true
                 let targetPoint = makeThrowTargetPoint(for: shotContext)
                 queuedEnemyTargetPoint = targetPoint
                 queuedEnemyAttackVariant = currentAttackVariant
@@ -235,6 +278,7 @@ final class GameScene: SKScene {
             }
         }
 
+        updateDodgeGuides(deltaTime: deltaTime)
         updateBullets(deltaTime: deltaTime)
         updatePendingHyperchargeExplosions(deltaTime: deltaTime)
         updateCameraShake(deltaTime: deltaTime)
@@ -496,6 +540,9 @@ final class GameScene: SKScene {
     }
 
     private var currentMovementInput: CGVector {
+        if bottomGuideSweepTest {
+            return CGVector(dx: bottomGuideSweepDirection, dy: 0)
+        }
         guard autoWallTest else { return autoAttackTest ? .zero : joystick.inputVector }
 
         if autoWallHoldTimeRemaining > 0 {
@@ -567,10 +614,14 @@ final class GameScene: SKScene {
         explosionContainer.removeAllChildren()
         lastUpdateTime = 0
         survivalTime = 0
+        hasStartedSurvivalTimer = false
 #if DEBUG
         survivalTime = TimeInterval(
             ProcessInfo.processInfo.environment["BULLETDODGE_START_TIME"] ?? "0"
         ) ?? 0
+        if survivalTime > 0 || autoWallTest {
+            hasStartedSurvivalTimer = true
+        }
 #endif
         dodgedCount = 0
         hitCount = 0
@@ -580,6 +631,7 @@ final class GameScene: SKScene {
         autoWallPhase = .bottomCenter
         autoWallHoldTimeRemaining = 0
         autoWallLogTimer = 0
+        bottomGuideSweepDirection = 1
         capturedAutoWallPhases.removeAll()
         autoAttackCaptureSchedule.removeAll()
         currentAttackCaptureID = 0
@@ -587,6 +639,9 @@ final class GameScene: SKScene {
         queuedEnemyAttackVariant = nil
         pendingHyperchargeExplosions.forEach { $0.coreNode.removeFromParent() }
         pendingHyperchargeExplosions.removeAll()
+        dodgeGuides.forEach { $0.container.removeFromParent() }
+        dodgeGuides.removeAll()
+        nextDodgeGuidePaletteIndex = 0
         isHyperchargeActive = false
         setHyperchargeAuraActive(false)
         isWallPressureRecoveryActive = false
@@ -611,6 +666,8 @@ final class GameScene: SKScene {
         } else if GameConfig.debugCornerAttackTestEnabled {
             let margin = GameConfig.playerCollisionRadius
             switch GameConfig.debugCornerStartPosition {
+            case "bottom-center":
+                player.position = CGPoint(x: playableRect.midX, y: playableRect.minY + margin)
             case "top-left":
                 player.position = CGPoint(x: playableRect.minX + margin, y: playableRect.maxY - margin)
             case "top-right":
@@ -1810,6 +1867,20 @@ final class GameScene: SKScene {
                 continue
             }
 
+            if case .active = outcome,
+               bullet.isThornShard,
+               !isInsidePlayableArena(
+                   bullet.groundContactWorldPosition,
+                   collisionRadius: -GameConfig.thornShardWallOverflowAllowance
+               ) {
+                if GameConfig.debugProjectileLoggingEnabled {
+                    print("FRAGMENT expired at arena wall")
+                }
+                dodgedCount += 1
+                bullet.removeFromParent()
+                continue
+            }
+
             switch outcome {
             case .active:
                 survivors.append(bullet)
@@ -1905,7 +1976,588 @@ final class GameScene: SKScene {
         bullet.zPosition = 25
         bullets.append(bullet)
         addChild(bullet)
+        createDodgeGuideIfNeeded(
+            for: bullet,
+            spawnPosition: spawnPoint,
+            direction: direction,
+            variant: variant
+        )
     }
+
+    private func createDodgeGuideIfNeeded(
+        for bullet: BulletNode,
+        spawnPosition: CGPoint,
+        direction: CGVector,
+        variant: ThornAttackVariant
+    ) {
+        let debugEnabled = ProcessInfo.processInfo.environment[
+            "BULLETDODGE_DODGE_GUIDE"
+        ] == "1"
+        guard dodgeGuideEnabled || debugEnabled else { return }
+
+        let prediction = BulletNode.burstPrediction(
+            spawnPosition: spawnPosition,
+            direction: direction
+        )
+        let safePoints = predictedSafePoints(
+            for: prediction,
+            parentSpawnPosition: spawnPosition,
+            parentDirection: direction
+        )
+        if debugEnabled {
+            print("DODGE GUIDE safePoints=\(safePoints.count)")
+        }
+        guard !safePoints.isEmpty else { return }
+
+        let palette = Self.dodgeGuidePalettes[nextDodgeGuidePaletteIndex]
+        nextDodgeGuidePaletteIndex = (nextDodgeGuidePaletteIndex + 1)
+            % Self.dodgeGuidePalettes.count
+
+        let container = SKNode()
+        // Keep guide points visible when the player is already standing on a
+        // valid gap. Player artwork is at 30 and its health bar reaches 34.
+        container.zPosition = 33
+        container.alpha = 0
+        for point in safePoints {
+            let marker = makeSafePointMarker(palette: palette)
+            marker.position = point
+            container.addChild(marker)
+        }
+        addChild(container)
+        dodgeGuides.append(
+            DodgeGuide(
+                sourceID: ObjectIdentifier(bullet),
+                container: container,
+                variant: variant
+            )
+        )
+    }
+
+    private func updateDodgeGuides(deltaTime: TimeInterval) {
+        guard !dodgeGuides.isEmpty else { return }
+
+        let revealTime = GameConfig.thornBallLifetime * 0.42
+        var activeGuides: [DodgeGuide] = []
+        activeGuides.reserveCapacity(dodgeGuides.count)
+
+        for var guide in dodgeGuides {
+            guide.elapsed += deltaTime
+            if guide.elapsed >= revealTime, guide.container.alpha == 0 {
+                guide.container.run(.fadeIn(withDuration: 0.12))
+            }
+
+            let finalBurstDelay = guide.variant == .hypercharge
+                ? GameConfig.hyperchargeSecondExplosionDelay
+                : 0
+            let expiry = GameConfig.thornBallLifetime
+                + finalBurstDelay
+                + GameConfig.thornShardFlightDuration
+                + 0.08
+            if guide.elapsed >= expiry {
+                guide.container.removeFromParent()
+            } else {
+                activeGuides.append(guide)
+            }
+        }
+        dodgeGuides = activeGuides
+    }
+
+    private func predictedSafePoints(
+        for prediction: ThornBurstPrediction,
+        parentSpawnPosition: CGPoint,
+        parentDirection: CGVector
+    ) -> [CGPoint] {
+        // Keep the gameplay collision circles unchanged, but place each guide
+        // far enough inside the gap that a small control/visual alignment error
+        // does not turn a correct dodge into a hit.
+        let safetyMargin: CGFloat = 2
+        let pathSegments = prediction.shardGroundPaths.flatMap { path in
+            Array(zip(path, path.dropFirst()))
+        }
+        let pathClearance = GameConfig.playerHitRadius
+            + GameConfig.thornShardContactRadius
+            + safetyMargin
+        let splashClearance = GameConfig.playerHitRadius
+            + GameConfig.explosionRadius
+            + safetyMargin
+        let parentClearance = GameConfig.playerHitRadius
+            + GameConfig.thornBallContactRadius
+            + safetyMargin
+        let parentGroundOffset = CGPoint(
+            x: prediction.damagePosition.x - prediction.explosionPosition.x,
+            y: prediction.damagePosition.y - prediction.explosionPosition.y
+        )
+        let parentGroundStart = CGPoint(
+            x: parentSpawnPosition.x + parentGroundOffset.x,
+            y: parentSpawnPosition.y + parentGroundOffset.y
+        )
+        let baseAngle = atan2(parentDirection.dy, parentDirection.dx)
+        let radius: CGFloat = 105
+        // At radius 105 the authored spiral has swept about -39.5 degrees
+        // from its 30-degree launch angle. The midpoint between neighboring
+        // shards is therefore 20.5 degrees from the parent direction.
+        let safeGapOffset = CGFloat(20.5) * (.pi / 180)
+        var safePoints: [CGPoint] = []
+        var firstGapCandidates: [CGPoint] = []
+        var firstGapPreferredPoint = CGPoint.zero
+        var firstGapAngle: CGFloat = 0
+        let collisionClearance: (CGPoint) -> CGFloat = { candidate in
+            let splashDistance = hypot(
+                candidate.x - prediction.damagePosition.x,
+                candidate.y - prediction.damagePosition.y
+            )
+            let splashMargin = splashDistance
+                - (GameConfig.playerHitRadius + GameConfig.explosionRadius)
+            let parentMargin = self.distance(
+                from: candidate,
+                to: parentGroundStart,
+                and: prediction.damagePosition
+            ) - (GameConfig.playerHitRadius + GameConfig.thornBallContactRadius)
+            let shardMargin = pathSegments.reduce(CGFloat.greatestFiniteMagnitude) {
+                current, segment in
+                min(
+                    current,
+                    self.distance(from: candidate, to: segment.0, and: segment.1)
+                        - (GameConfig.playerHitRadius + GameConfig.thornShardContactRadius)
+                )
+            }
+            return min(splashMargin, parentMargin, shardMargin)
+        }
+        let isCollisionSafe: (CGPoint) -> Bool = { candidate in
+            let splashDistance = hypot(
+                candidate.x - prediction.damagePosition.x,
+                candidate.y - prediction.damagePosition.y
+            )
+            guard splashDistance >= splashClearance else { return false }
+            guard self.distance(
+                from: candidate,
+                to: parentGroundStart,
+                and: prediction.damagePosition
+            ) >= parentClearance else { return false }
+            return pathSegments.allSatisfy { segment in
+                self.distance(from: candidate, to: segment.0, and: segment.1)
+                    >= pathClearance
+            }
+        }
+        for sector in 0..<GameConfig.thornShardCount {
+            let angle = baseAngle
+                + safeGapOffset
+                + CGFloat(sector) * (.pi / 3)
+            let idealPoint = CGPoint(
+                x: prediction.explosionPosition.x + cos(angle) * radius,
+                y: prediction.explosionPosition.y + sin(angle) * radius
+            )
+            let nextSector = (sector + 1) % GameConfig.thornShardCount
+            guard sector < prediction.shardGroundPaths.count,
+                  nextSector < prediction.shardGroundPaths.count else {
+                continue
+            }
+
+            let firstPath = prediction.shardGroundPaths[sector]
+            let secondPath = prediction.shardGroundPaths[nextSector]
+            let sampleCount = min(firstPath.count, secondPath.count)
+            guard sampleCount > 0 else { continue }
+
+            let gapPath = (0..<sampleCount).map { index in
+                CGPoint(
+                    x: (firstPath[index].x + secondPath[index].x) * 0.5,
+                    y: (firstPath[index].y + secondPath[index].y) * 0.5
+                )
+            }
+            let baseIndex = gapPath.indices.min {
+                hypot(gapPath[$0].x - idealPoint.x, gapPath[$0].y - idealPoint.y)
+                    < hypot(gapPath[$1].x - idealPoint.x, gapPath[$1].y - idealPoint.y)
+            } ?? gapPath.startIndex
+            let preferredPoint = constrainedReachableGuidePoint(gapPath[baseIndex])
+            let closingEdgeTarget: CGFloat? = if sector == GameConfig.thornShardCount - 1,
+                                                 safePoints.count >= 2 {
+                hypot(
+                    safePoints[1].x - safePoints[0].x,
+                    safePoints[1].y - safePoints[0].y
+                )
+            } else {
+                nil
+            }
+            let closingEdgeCost: (CGPoint) -> CGFloat = { candidate in
+                guard let closingEdgeTarget, let firstPoint = safePoints.first else {
+                    return 0
+                }
+                let closingDistance = hypot(
+                    candidate.x - firstPoint.x,
+                    candidate.y - firstPoint.y
+                )
+                return abs(closingDistance - closingEdgeTarget) * 5
+            }
+            let candidates = reachableGuideCandidates(
+                around: preferredPoint,
+                naturalGapPath: gapPath
+            ).sorted {
+                guideCandidateScore($0, preferred: gapPath[baseIndex], gapAngle: angle,
+                                    explosion: prediction.explosionPosition) + closingEdgeCost($0)
+                    < guideCandidateScore($1, preferred: gapPath[baseIndex], gapAngle: angle,
+                                          explosion: prediction.explosionPosition) + closingEdgeCost($1)
+            }
+
+            if sector == 0 {
+                firstGapCandidates = candidates
+                firstGapPreferredPoint = gapPath[baseIndex]
+                firstGapAngle = angle
+            }
+
+            let isSafeForGap: (CGPoint, CGFloat, Int, [CGPoint]) -> Bool = {
+                candidate, expectedAngle, expectedSector, existingPoints in
+                let candidateAngle = atan2(
+                    candidate.y - prediction.explosionPosition.y,
+                    candidate.x - prediction.explosionPosition.x
+                )
+                // A wall projection must never move two markers into the same
+                // thorn gap. If this sector has no reachable point, the later
+                // unconstrained fallback keeps its marker outside the wall
+                // rather than borrowing a neighboring gap.
+                guard self.angularDistance(candidateAngle, expectedAngle) <= .pi / 3 else {
+                    return false
+                }
+                guard self.guideGapBucket(
+                    for: candidate,
+                    explosion: prediction.explosionPosition,
+                    firstGapAngle: baseAngle + safeGapOffset
+                ) == expectedSector else {
+                    return false
+                }
+                guard existingPoints.allSatisfy({
+                    hypot($0.x - candidate.x, $0.y - candidate.y) >= 20
+                }) else { return false }
+                return isCollisionSafe(candidate)
+            }
+            let isSafeCandidate: (CGPoint) -> Bool = { candidate in
+                isSafeForGap(candidate, angle, sector, safePoints)
+            }
+
+            if sector == GameConfig.thornShardCount - 1,
+               safePoints.count == GameConfig.thornShardCount - 1,
+               !firstGapCandidates.isEmpty {
+                let middlePoints = Array(safePoints.dropFirst())
+                let firstOptions = Array(firstGapCandidates.lazy.filter {
+                    isSafeForGap($0, firstGapAngle, 0, middlePoints)
+                }.prefix(200))
+                let lastOptions = Array(candidates.lazy.filter {
+                    isSafeForGap(
+                        $0,
+                        angle,
+                        GameConfig.thornShardCount - 1,
+                        middlePoints
+                    )
+                }.prefix(200))
+                var bestPair: (first: CGPoint, last: CGPoint, cost: CGFloat)?
+
+                for first in firstOptions {
+                    let firstToNext = hypot(
+                        first.x - safePoints[1].x,
+                        first.y - safePoints[1].y
+                    )
+                    for last in lastOptions {
+                        let closingDistance = hypot(
+                            last.x - first.x,
+                            last.y - first.y
+                        )
+                        guard closingDistance >= 20 else { continue }
+                        let pairCost = guideCandidateScore(
+                            first,
+                            preferred: firstGapPreferredPoint,
+                            gapAngle: firstGapAngle,
+                            explosion: prediction.explosionPosition
+                        ) + guideCandidateScore(
+                            last,
+                            preferred: gapPath[baseIndex],
+                            gapAngle: angle,
+                            explosion: prediction.explosionPosition
+                        ) + abs(closingDistance - firstToNext) * 20
+                        if bestPair == nil || pairCost < bestPair!.cost {
+                            bestPair = (first, last, pairCost)
+                        }
+                    }
+                }
+
+                if let bestPair {
+                    safePoints[0] = bestPair.first
+                    safePoints.append(bestPair.last)
+                    continue
+                }
+            }
+
+            if let safePoint = candidates.first(where: isSafeCandidate) {
+                safePoints.append(safePoint)
+                continue
+            }
+
+            // At an extreme corner an outward-facing gap has no point that the
+            // player can physically reach without changing that gap into a
+            // neighboring one. Keep all six gap identities by falling back to
+            // the closest safe point in the original gap, even if it remains
+            // slightly outside the movement boundary.
+            let fallbackCandidates = unconstrainedGuideCandidates(
+                around: idealPoint,
+                naturalGapPath: gapPath
+            ).sorted {
+                guideFallbackScore($0, preferred: idealPoint) + closingEdgeCost($0)
+                    < guideFallbackScore($1, preferred: idealPoint) + closingEdgeCost($1)
+            }
+            if let fallback = fallbackCandidates.first(where: isSafeCandidate) {
+                safePoints.append(fallback)
+            }
+        }
+        if ProcessInfo.processInfo.environment["BULLETDODGE_DODGE_GUIDE"] == "1" {
+            let buckets = safePoints.map { point in
+                guideGapBucket(
+                    for: point,
+                    explosion: prediction.explosionPosition,
+                    firstGapAngle: baseAngle + safeGapOffset
+                )
+            }
+            let coordinates = safePoints.map {
+                "(\(Int($0.x)),\(Int($0.y)))"
+            }.joined(separator: ",")
+            let clearances = safePoints.map {
+                String(format: "%.1f", collisionClearance($0))
+            }.joined(separator: ",")
+            print(
+                "DODGE GUIDE buckets=\(buckets) points=\(coordinates) "
+                    + "clearance=\(clearances)"
+            )
+        }
+        return safePoints
+    }
+
+    private func guideGapBucket(
+        for point: CGPoint,
+        explosion: CGPoint,
+        firstGapAngle: CGFloat
+    ) -> Int {
+        let markerAngle = atan2(
+            point.y - explosion.y,
+            point.x - explosion.x
+        )
+        var relative = (markerAngle - firstGapAngle)
+            .truncatingRemainder(dividingBy: 2 * .pi)
+        if relative < 0 { relative += 2 * .pi }
+        return Int((relative / (.pi / 3)).rounded()) % GameConfig.thornShardCount
+    }
+
+    private func constrainedReachableGuidePoint(_ hitCenter: CGPoint) -> CGPoint {
+        let playerPosition = CGPoint(
+            x: hitCenter.x,
+            y: hitCenter.y - GameConfig.playerHitCenterYOffset
+        )
+        let constrained = constrainedArenaPosition(
+            playerPosition,
+            collisionRadius: GameConfig.playerCollisionRadius
+        )
+        return CGPoint(
+            x: constrained.x,
+            y: constrained.y + GameConfig.playerHitCenterYOffset
+        )
+    }
+
+    private func reachableGuideCandidates(
+        around center: CGPoint,
+        naturalGapPath: [CGPoint]
+    ) -> [CGPoint] {
+        var candidates: [CGPoint] = []
+        func appendUnique(_ point: CGPoint) {
+            let reachable = constrainedReachableGuidePoint(point)
+            guard !candidates.contains(where: {
+                hypot($0.x - reachable.x, $0.y - reachable.y) < 1
+            }) else { return }
+            candidates.append(reachable)
+        }
+
+        appendUnique(center)
+        naturalGapPath.forEach(appendUnique)
+        // Search the area nearest the authored gap at high resolution first.
+        // This preserves the compact hexagon at a wall while still finding a
+        // point with real collision tolerance instead of jumping far sideways.
+        for radius in stride(from: CGFloat(3), through: 36, by: 3) {
+            for step in 0..<36 {
+                let angle = CGFloat(step) * (.pi / 18)
+                appendUnique(
+                    CGPoint(
+                        x: center.x + cos(angle) * radius,
+                        y: center.y + sin(angle) * radius
+                    )
+                )
+            }
+        }
+        for radius in stride(from: CGFloat(48), through: 180, by: 12) {
+            for step in 0..<24 {
+                let angle = CGFloat(step) * (.pi / 12)
+                appendUnique(
+                    CGPoint(
+                        x: center.x + cos(angle) * radius,
+                        y: center.y + sin(angle) * radius
+                    )
+                )
+            }
+        }
+        return candidates
+    }
+
+    private func unconstrainedGuideCandidates(
+        around center: CGPoint,
+        naturalGapPath: [CGPoint]
+    ) -> [CGPoint] {
+        var candidates: [CGPoint] = []
+        func appendUnique(_ point: CGPoint) {
+            guard !candidates.contains(where: {
+                hypot($0.x - point.x, $0.y - point.y) < 1
+            }) else { return }
+            candidates.append(point)
+        }
+
+        appendUnique(center)
+        naturalGapPath.forEach(appendUnique)
+        for radius in stride(from: CGFloat(3), through: 36, by: 3) {
+            for step in 0..<36 {
+                let angle = CGFloat(step) * (.pi / 18)
+                appendUnique(
+                    CGPoint(
+                        x: center.x + cos(angle) * radius,
+                        y: center.y + sin(angle) * radius
+                    )
+                )
+            }
+        }
+        for radius in stride(from: CGFloat(48), through: 180, by: 12) {
+            for step in 0..<24 {
+                let angle = CGFloat(step) * (.pi / 12)
+                appendUnique(
+                    CGPoint(
+                        x: center.x + cos(angle) * radius,
+                        y: center.y + sin(angle) * radius
+                    )
+                )
+            }
+        }
+        return candidates
+    }
+
+    private func guideCandidateScore(
+        _ candidate: CGPoint,
+        preferred: CGPoint,
+        gapAngle: CGFloat,
+        explosion: CGPoint
+    ) -> CGFloat {
+        let positionCost = hypot(
+            candidate.x - preferred.x,
+            candidate.y - preferred.y
+        )
+        let candidateAngle = atan2(
+            candidate.y - explosion.y,
+            candidate.x - explosion.x
+        )
+        return positionCost + angularDistance(candidateAngle, gapAngle) * 28
+    }
+
+    private func guideFallbackScore(_ candidate: CGPoint, preferred: CGPoint) -> CGFloat {
+        let positionCost = hypot(
+            candidate.x - preferred.x,
+            candidate.y - preferred.y
+        )
+        let reachable = constrainedReachableGuidePoint(candidate)
+        let reachabilityCost = hypot(
+            candidate.x - reachable.x,
+            candidate.y - reachable.y
+        )
+        return positionCost + reachabilityCost * 0.35
+    }
+
+    private func angularDistance(_ first: CGFloat, _ second: CGFloat) -> CGFloat {
+        var difference = (first - second).truncatingRemainder(dividingBy: 2 * .pi)
+        if difference > .pi {
+            difference -= 2 * .pi
+        } else if difference < -.pi {
+            difference += 2 * .pi
+        }
+        return abs(difference)
+    }
+
+    private func distance(from point: CGPoint, to start: CGPoint, and end: CGPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0.000_001 else {
+            return hypot(point.x - start.x, point.y - start.y)
+        }
+        let projection = min(
+            1,
+            max(
+                0,
+                ((point.x - start.x) * dx + (point.y - start.y) * dy)
+                    / lengthSquared
+            )
+        )
+        return hypot(
+            point.x - (start.x + dx * projection),
+            point.y - (start.y + dy * projection)
+        )
+    }
+
+    private func isInsidePlayableArena(
+        _ point: CGPoint,
+        collisionRadius: CGFloat = 0
+    ) -> Bool {
+        let constrained = constrainedArenaPosition(
+            point,
+            collisionRadius: collisionRadius
+        )
+        return hypot(constrained.x - point.x, constrained.y - point.y) < 0.5
+    }
+
+    private func makeSafePointMarker(palette: DodgeGuidePalette) -> SKNode {
+        let marker = SKNode()
+        let halo = SKShapeNode(circleOfRadius: 9.5)
+        halo.fillColor = palette.haloFill
+        halo.strokeColor = palette.haloStroke
+        halo.lineWidth = 2
+        halo.glowWidth = 3
+        marker.addChild(halo)
+
+        let dot = SKShapeNode(circleOfRadius: 3.2)
+        dot.fillColor = palette.dotFill
+        dot.strokeColor = palette.dotStroke
+        dot.lineWidth = 1.5
+        marker.addChild(dot)
+
+        marker.run(
+            .repeatForever(
+                .sequence([
+                    .group([.scale(to: 1.10, duration: 0.46), .fadeAlpha(to: 0.72, duration: 0.46)]),
+                    .group([.scale(to: 0.94, duration: 0.46), .fadeAlpha(to: 1.0, duration: 0.46)])
+                ])
+            )
+        )
+        return marker
+    }
+
+    private static let dodgeGuidePalettes: [DodgeGuidePalette] = [
+        DodgeGuidePalette(
+            haloFill: UIColor(red: 0.08, green: 0.86, blue: 0.88, alpha: 0.16),
+            haloStroke: UIColor(red: 0.20, green: 0.98, blue: 0.92, alpha: 0.90),
+            dotFill: UIColor(red: 0.86, green: 1.0, blue: 0.96, alpha: 1),
+            dotStroke: UIColor(red: 0.08, green: 0.72, blue: 0.76, alpha: 1)
+        ),
+        DodgeGuidePalette(
+            haloFill: UIColor(red: 1.0, green: 0.72, blue: 0.08, alpha: 0.18),
+            haloStroke: UIColor(red: 1.0, green: 0.82, blue: 0.24, alpha: 0.94),
+            dotFill: UIColor(red: 1.0, green: 0.96, blue: 0.72, alpha: 1),
+            dotStroke: UIColor(red: 0.72, green: 0.46, blue: 0.04, alpha: 1)
+        ),
+        DodgeGuidePalette(
+            haloFill: UIColor(red: 0.46, green: 0.24, blue: 1.0, alpha: 0.18),
+            haloStroke: UIColor(red: 0.66, green: 0.42, blue: 1.0, alpha: 0.94),
+            dotFill: UIColor(red: 0.94, green: 0.88, blue: 1.0, alpha: 1),
+            dotStroke: UIColor(red: 0.36, green: 0.14, blue: 0.78, alpha: 1)
+        )
+    ]
 
     private func scheduleAutoAttackCaptures() {
         guard autoAttackCapture else { return }
@@ -2096,15 +2748,15 @@ final class GameScene: SKScene {
             dy: refinedPoint.y - enemy.position.y
         ).normalized
         let perpendicular = CGVector(dx: towardPlayer.dy, dy: -towardPlayer.dx)
-        let side: CGFloat = Bool.random() ? 1 : -1
+        let side: CGFloat = randomSource.bool() ? 1 : -1
         let lateralOffset: CGFloat
         switch shotContext.aimStyle {
         case .direct:
             lateralOffset = 0
         case .smallOffset:
-            lateralOffset = CGFloat.random(in: GameConfig.enemySmallAimOffsetRange) * side
+            lateralOffset = randomSource.cgFloat(in: GameConfig.enemySmallAimOffsetRange) * side
         case .largeOffset:
-            lateralOffset = CGFloat.random(in: GameConfig.enemyLargeAimOffsetRange) * side
+            lateralOffset = randomSource.cgFloat(in: GameConfig.enemyLargeAimOffsetRange) * side
         }
         refinedPoint.x += perpendicular.dx * lateralOffset
         refinedPoint.y += perpendicular.dy * lateralOffset
@@ -2120,6 +2772,13 @@ final class GameScene: SKScene {
     }
 
     private func handleExplosion(_ explosion: ExplosionSpec, from bullet: BulletNode) -> [BulletNode] {
+        let sourceID = ObjectIdentifier(bullet)
+        if let index = dodgeGuides.firstIndex(where: { $0.sourceID == sourceID }) {
+            if dodgeGuides[index].elapsed < GameConfig.thornBallLifetime * 0.82 {
+                dodgeGuides[index].container.removeFromParent()
+                dodgeGuides.remove(at: index)
+            }
+        }
         bullet.removeFromParent()
         let fragments = resolveExplosion(explosion)
 

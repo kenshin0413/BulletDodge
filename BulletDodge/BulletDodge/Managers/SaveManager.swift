@@ -23,12 +23,17 @@ final class SaveManager: ObservableObject {
     @Published private(set) var bestDodgedCount: Int
     @Published private(set) var joystickMode: JoystickMode
     @Published private(set) var playerSpeedSetting: PlayerSpeedSetting
+    @Published private(set) var dodgeGuideEnabled: Bool
+    @Published private(set) var playerProgress: PlayerProgress
 
     private let defaults = UserDefaults.standard
     private let bestSurvivalTimeKey = "bestSurvivalTime"
     private let bestDodgedCountKey = "bestDodgedCount"
     private let joystickModeKey = "joystickMode"
     private let playerSpeedSettingKey = "playerSpeedSetting"
+    private let dodgeGuideEnabledKey = "dodgeGuideEnabled"
+    private let playerProgressKey = "playerProgress.v1"
+    private let interstitialPlayCountKey = "interstitialPlayCount"
 
     init() {
         bestSurvivalTime = defaults.double(forKey: bestSurvivalTimeKey)
@@ -39,9 +44,27 @@ final class SaveManager: ObservableObject {
         playerSpeedSetting = PlayerSpeedSetting(
             rawValue: defaults.string(forKey: playerSpeedSettingKey) ?? ""
         ) ?? .normal
+        dodgeGuideEnabled = defaults.bool(forKey: dodgeGuideEnabledKey)
+        if let data = defaults.data(forKey: playerProgressKey),
+           let savedProgress = try? JSONDecoder().decode(PlayerProgress.self, from: data) {
+            playerProgress = savedProgress
+        } else {
+            playerProgress = .empty
+        }
+
+#if DEBUG
+        if ProcessInfo.processInfo.environment["BULLETDODGE_PROGRESS_PREVIEW"] == "1" {
+            playerProgress = .preview
+            bestSurvivalTime = max(bestSurvivalTime, 70.4)
+            bestDodgedCount = max(bestDodgedCount, 144)
+        }
+#endif
     }
 
     func updateBestRecords(with result: GameResult) {
+        playerProgress.record(result)
+        persistPlayerProgress()
+
         if result.survivalTime > bestSurvivalTime {
             bestSurvivalTime = result.survivalTime
             defaults.set(result.survivalTime, forKey: bestSurvivalTimeKey)
@@ -51,6 +74,12 @@ final class SaveManager: ObservableObject {
             bestDodgedCount = result.dodgedCount
             defaults.set(result.dodgedCount, forKey: bestDodgedCountKey)
         }
+    }
+
+    func registerPlayForInterstitial() -> Bool {
+        let nextCount = defaults.integer(forKey: interstitialPlayCountKey) + 1
+        defaults.set(nextCount, forKey: interstitialPlayCountKey)
+        return nextCount.isMultiple(of: 3)
     }
 
     func setJoystickMode(_ mode: JoystickMode) {
@@ -63,5 +92,16 @@ final class SaveManager: ObservableObject {
         guard playerSpeedSetting != setting else { return }
         playerSpeedSetting = setting
         defaults.set(setting.rawValue, forKey: playerSpeedSettingKey)
+    }
+
+    func setDodgeGuideEnabled(_ isEnabled: Bool) {
+        guard dodgeGuideEnabled != isEnabled else { return }
+        dodgeGuideEnabled = isEnabled
+        defaults.set(isEnabled, forKey: dodgeGuideEnabledKey)
+    }
+
+    private func persistPlayerProgress() {
+        guard let data = try? JSONEncoder().encode(playerProgress) else { return }
+        defaults.set(data, forKey: playerProgressKey)
     }
 }
