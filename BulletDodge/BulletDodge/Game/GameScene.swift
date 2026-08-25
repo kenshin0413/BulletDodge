@@ -74,6 +74,7 @@ final class GameScene: SKScene {
     private let mapNode = SKShapeNode(rectOf: GameConfig.mapSize, cornerRadius: 0)
     private let player = PlayerNode()
     private let randomSource: SeededRandomSource
+    private let attackRules: BattleAttackRules
     private let enemy: EnemyNode
     private let joystick: VirtualJoystick
     private let playerSpeedSetting: PlayerSpeedSetting
@@ -150,11 +151,13 @@ final class GameScene: SKScene {
         joystickMode: JoystickMode,
         playerSpeedSetting: PlayerSpeedSetting,
         dodgeGuideEnabled: Bool,
+        attackRules: BattleAttackRules,
         sessionStore: GameSessionStore,
         onGameOver: @escaping (GameResult) -> Void
     ) {
         let randomSource = SeededRandomSource(seed: seed)
         self.randomSource = randomSource
+        self.attackRules = attackRules
         enemy = EnemyNode(randomSource: randomSource)
         joystick = VirtualJoystick(mode: joystickMode)
         self.playerSpeedSetting = playerSpeedSetting
@@ -255,6 +258,7 @@ final class GameScene: SKScene {
             enemy.updateStationaryPose(deltaTime: deltaTime)
         }
         enemy.updateReload(deltaTime: deltaTime)
+        enemy.setBurstWeights(attackRules.burstWeights(at: survivalTime))
 
         if GameConfig.enemyAttacksEnabled && !autoWallTest {
             switch enemy.updateAttack(deltaTime: deltaTime) {
@@ -294,10 +298,7 @@ final class GameScene: SKScene {
     }
 
     private func updateHyperchargeState() {
-        let shouldBeActive = GameConfig.hyperchargeStartTimes.contains { startTime in
-            survivalTime >= startTime
-                && survivalTime < startTime + GameConfig.hyperchargeDuration
-        }
+        let shouldBeActive = attackRules.isHyperchargeActive(at: survivalTime)
         guard shouldBeActive != isHyperchargeActive else { return }
 
         isHyperchargeActive = shouldBeActive

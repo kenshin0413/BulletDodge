@@ -1,25 +1,67 @@
 import Foundation
 
 enum PerformanceRank: String, CaseIterable, Codable, Identifiable {
+    case sss = "SSS"
+    case ssPlus = "SS+"
     case ss = "SS"
+    case ssMinus = "SS-"
+    case sPlus = "S+"
     case s = "S"
+    case sMinus = "S-"
+    case aPlus = "A+"
     case a = "A"
+    case aMinus = "A-"
+    case bPlus = "B+"
     case b = "B"
+    case bMinus = "B-"
+    case cPlus = "C+"
     case c = "C"
+    case cMinus = "C-"
+    case dPlus = "D+"
     case d = "D"
+    case dMinus = "D-"
 
     var id: String { rawValue }
 
     init(survivalTime: TimeInterval) {
         switch survivalTime {
-        case 68...: self = .ss
-        case 45...: self = .s
-        case 35...: self = .a
-        case 20...: self = .b
-        case 10...: self = .c
-        default: self = .d
+        case 115...: self = .sss
+        case 100...: self = .ssPlus
+        case 90...: self = .ss
+        case 80...: self = .ssMinus
+        case 75...: self = .sPlus
+        case 70...: self = .s
+        case 65...: self = .sMinus
+        case 60...: self = .aPlus
+        case 55...: self = .a
+        case 50...: self = .aMinus
+        case 45...: self = .bPlus
+        case 40...: self = .b
+        case 35...: self = .bMinus
+        case 30...: self = .cPlus
+        case 25...: self = .c
+        case 20...: self = .cMinus
+        case 15...: self = .dPlus
+        case 10...: self = .d
+        default: self = .dMinus
         }
     }
+
+    var tier: PerformanceRankTier {
+        switch self {
+        case .sss: .sss
+        case .ssPlus, .ss, .ssMinus: .ss
+        case .sPlus, .s, .sMinus: .s
+        case .aPlus, .a, .aMinus: .a
+        case .bPlus, .b, .bMinus: .b
+        case .cPlus, .c, .cMinus: .c
+        case .dPlus, .d, .dMinus: .d
+        }
+    }
+}
+
+enum PerformanceRankTier {
+    case sss, ss, s, a, b, c, d
 }
 
 struct GameRunRecord: Codable, Equatable, Identifiable {
@@ -127,7 +169,9 @@ struct PlayerProgress: Codable, Equatable {
     }
 
     func count(for rank: PerformanceRank) -> Int {
-        rankCounts[rank.rawValue] ?? 0
+        recentRuns.reduce(into: 0) { count, run in
+            if run.rank == rank { count += 1 }
+        }
     }
 
     func progress(for speed: PlayerSpeedSetting) -> SpeedProgress {

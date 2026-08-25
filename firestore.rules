@@ -55,6 +55,14 @@ service cloud.firestore {
       return 'v' + string(currentSeasonNumber());
     }
 
+    function validCurrentRuleVersion(version) {
+      return currentSeasonNumber() == 1
+        ? version == 1
+        : (currentSeasonNumber() == 2
+          ? version in [1, 2]
+          : version == 2);
+    }
+
     function validCurrentSeason(data, seasonID) {
       return currentSeasonNumber() >= 1
         && seasonID == currentSeasonID()
@@ -127,7 +135,7 @@ service cloud.firestore {
           )
         )
         && request.resource.data.uid == uid
-        && request.resource.data.ruleVersion == 1
+        && validCurrentRuleVersion(request.resource.data.ruleVersion)
         && request.resource.data.status == 'active'
         && request.resource.data.startedAt == request.time;
       allow update: if owns(uid) && (
@@ -148,7 +156,7 @@ service cloud.firestore {
             )
           )
           && request.resource.data.uid == uid
-          && request.resource.data.ruleVersion == 1
+          && validCurrentRuleVersion(request.resource.data.ruleVersion)
           && request.resource.data.status == 'active'
           && request.resource.data.startedAt == request.time
         ) || (
@@ -188,7 +196,7 @@ service cloud.firestore {
           )
         )
         && request.resource.data.uid == uid
-        && request.resource.data.ruleVersion == 1
+        && validCurrentRuleVersion(request.resource.data.ruleVersion)
         && validName(request.resource.data.displayName)
         && canUseIcon(uid, request.resource.data.iconID)
         && request.resource.data.displayName
@@ -201,7 +209,11 @@ service cloud.firestore {
         && request.resource.data.dodgedCount >= 0
         && request.resource.data.achievedAt == request.time
         && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.status == 'active'
-        && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.ruleVersion == 1
+        && validCurrentRuleVersion(
+          get(/databases/$(database)/documents/rankingRuns/$(uid)).data.ruleVersion
+        )
+        && request.resource.data.ruleVersion
+          == get(/databases/$(database)/documents/rankingRuns/$(uid)).data.ruleVersion
         && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.get('seasonNumber', 1)
           == request.resource.data.get('seasonNumber', 1)
         && duration.value(request.resource.data.survivalMilliseconds, 'ms')
@@ -238,7 +250,7 @@ service cloud.firestore {
             )
           )
           && request.resource.data.uid == uid
-          && request.resource.data.ruleVersion == 1
+          && validCurrentRuleVersion(request.resource.data.ruleVersion)
           && validName(request.resource.data.displayName)
           && canUseIcon(uid, request.resource.data.iconID)
           && request.resource.data.displayName
@@ -251,7 +263,11 @@ service cloud.firestore {
           && request.resource.data.dodgedCount >= 0
           && request.resource.data.achievedAt == request.time
           && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.status == 'active'
-          && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.ruleVersion == 1
+          && validCurrentRuleVersion(
+            get(/databases/$(database)/documents/rankingRuns/$(uid)).data.ruleVersion
+          )
+          && request.resource.data.ruleVersion
+            == get(/databases/$(database)/documents/rankingRuns/$(uid)).data.ruleVersion
           && get(/databases/$(database)/documents/rankingRuns/$(uid)).data.get('seasonNumber', 1)
             == request.resource.data.get('seasonNumber', 1)
           && duration.value(request.resource.data.survivalMilliseconds, 'ms')
