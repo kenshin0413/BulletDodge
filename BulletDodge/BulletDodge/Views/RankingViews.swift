@@ -317,9 +317,12 @@ struct AccountView: View {
                     Label(L10n.text("progress.rank_distribution"), systemImage: "chart.bar.fill")
                         .font(.system(size: 19 * scale, weight: .black, design: .rounded))
                         .foregroundStyle(RankingPalette.ink)
-                    HStack(alignment: .bottom, spacing: 10 * scale) {
-                        ForEach(PerformanceRank.allCases) { rank in
-                            rankColumn(rank, scale: scale)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .bottom, spacing: 9 * scale) {
+                            ForEach(PerformanceRank.allCases) { rank in
+                                rankColumn(rank, scale: scale)
+                                    .frame(width: 34 * scale)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -494,7 +497,8 @@ struct AccountView: View {
     }
 
     private func color(for rank: PerformanceRank) -> Color {
-        switch rank {
+        switch rank.tier {
+        case .sss: Color(red: 0.95, green: 0.28, blue: 0.50)
         case .ss: GameTheme.violet
         case .s: GameTheme.gold
         case .a: GameTheme.mint
@@ -976,7 +980,8 @@ struct LeaderboardView: View {
     }
 
     private func leaderboardRankColor(_ rank: PerformanceRank) -> Color {
-        switch rank {
+        switch rank.tier {
+        case .sss: Color(red: 0.78, green: 0.05, blue: 0.28)
         case .ss: GameTheme.violet
         case .s: Color(red: 0.64, green: 0.39, blue: 0.02)
         case .a: Color(red: 0.05, green: 0.46, blue: 0.31)

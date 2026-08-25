@@ -66,6 +66,7 @@ final class EnemyNode: SKNode {
     private var lastDelta: CGVector = .zero
     private var facingAngle: CGFloat = 0
     private var attackFacingLockTimer: TimeInterval = 0
+    private var burstWeights = BurstWeights(single: 52, double: 33, triple: 15)
 
     init(randomSource: SeededRandomSource) {
         self.randomSource = randomSource
@@ -452,6 +453,10 @@ final class EnemyNode: SKNode {
         return .beganThrow(shotContext)
     }
 
+    func setBurstWeights(_ weights: BurstWeights) {
+        burstWeights = weights
+    }
+
     private func beginBurst() {
         let requestedShotCount = GameConfig.autoAttackTestEnabled
             || movementMode == .approaching
@@ -482,14 +487,12 @@ final class EnemyNode: SKNode {
     }
 
     private func randomBurstSize() -> Int {
-        let totalWeight = GameConfig.enemySingleShotWeight
-            + GameConfig.enemyDoubleShotWeight
-            + GameConfig.enemyTripleShotWeight
+        let totalWeight = burstWeights.single + burstWeights.double + burstWeights.triple
         let roll = randomSource.int(in: 0..<totalWeight)
-        if roll < GameConfig.enemySingleShotWeight {
+        if roll < burstWeights.single {
             return 1
         }
-        if roll < GameConfig.enemySingleShotWeight + GameConfig.enemyDoubleShotWeight {
+        if roll < burstWeights.single + burstWeights.double {
             return 2
         }
         return 3

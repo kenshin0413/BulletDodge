@@ -807,25 +807,19 @@ struct HomeView: View {
 
     private var bestRankLetter: String {
         guard bestSurvivalTime > 0 else { return "—" }
-        switch bestSurvivalTime {
-        case 68...: return "SS"
-        case 45...: return "S"
-        case 35...: return "A"
-        case 20...: return "B"
-        case 10...: return "C"
-        default: return "D"
-        }
+        return PerformanceRank(survivalTime: bestSurvivalTime).rawValue
     }
 
     private var bestRankColor: Color {
-        switch bestRankLetter {
-        case "SS": return GameTheme.violet
-        case "S": return GameTheme.gold
-        case "A": return GameTheme.mint
-        case "B": return GameTheme.cyan
-        case "C": return GameTheme.coral
-        case "D": return GameTheme.softText
-        default: return .white.opacity(0.72)
+        guard bestSurvivalTime > 0 else { return .white.opacity(0.72) }
+        switch PerformanceRank(survivalTime: bestSurvivalTime).tier {
+        case .sss: return Color(red: 0.95, green: 0.28, blue: 0.50)
+        case .ss: return GameTheme.violet
+        case .s: return GameTheme.gold
+        case .a: return GameTheme.mint
+        case .b: return GameTheme.cyan
+        case .c: return GameTheme.coral
+        case .d: return GameTheme.softText
         }
     }
 }

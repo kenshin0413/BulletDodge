@@ -282,9 +282,12 @@ struct GrowthRecordView: View {
                 scale: scale
             )
 
-            HStack(alignment: .bottom, spacing: 18 * scale) {
-                ForEach(PerformanceRank.allCases) { rank in
-                    rankBar(rank: rank, scale: scale)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .bottom, spacing: 12 * scale) {
+                    ForEach(PerformanceRank.allCases) { rank in
+                        rankBar(rank: rank, scale: scale)
+                            .frame(width: 46 * scale)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -613,7 +616,8 @@ struct GrowthRecordView: View {
     }
 
     private func color(for rank: PerformanceRank) -> Color {
-        switch rank {
+        switch rank.tier {
+        case .sss: return Color(red: 0.95, green: 0.28, blue: 0.50)
         case .ss: return GameTheme.violet
         case .s: return GameTheme.gold
         case .a: return GameTheme.mint

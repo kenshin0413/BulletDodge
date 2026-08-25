@@ -30,6 +30,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
         FirebaseApp.app()?.isDataCollectionDefaultEnabled = true
 
+#if DEBUG
+        RuleBoundaryChecks.run()
+#endif
+
         return true
     }
 
@@ -37,44 +41,50 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
     ) -> UIInterfaceOrientationMask {
-        .landscape
+        UIDevice.current.userInterfaceIdiom == .pad ? .all : .landscape
     }
 }
 
 @main
 struct BulletDodgeApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
         WindowGroup {
             FixedLandscapeCanvas {
                 LaunchFlowView()
             }
+                .task {
+                    // scenePhase does not necessarily change after the first frame,
+                    // so request landscape explicitly during initial presentation too.
+                    requestLandscapeGeometry()
+                    try? await Task.sleep(for: .milliseconds(300))
+                    requestLandscapeGeometry()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active else { return }
+                    requestLandscapeGeometry()
+                }
         }
     }
-}
 
-private struct FixedLandscapeCanvas<Content: View>: View {
-    private let content: Content
-
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            let shouldRotate = UIDevice.current.userInterfaceIdiom == .pad
-                && geometry.size.height > geometry.size.width
-            let canvasSize = shouldRotate
-                ? CGSize(width: geometry.size.height, height: geometry.size.width)
-                : geometry.size
-
-            content
-                .frame(width: canvasSize.width, height: canvasSize.height)
-                .rotationEffect(.degrees(shouldRotate ? 90 : 0))
-                .frame(width: geometry.size.width, height: geometry.size.height)
+    private func requestLandscapeGeometry() {
+        // iPadOS 26 doesn't visually rotate a landscape-only scene while the
+        // device is held in portrait. The iPad canvas handles that case itself.
+        guard UIDevice.current.userInterfaceIdiom != .pad else { return }
+        let preferences = UIWindowScene.GeometryPreferences.iOS(
+            interfaceOrientations: .landscape
+        )
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.requestGeometryUpdate(preferences) { error in
+#if DEBUG
+                print("Landscape geometry request failed: \(error.localizedDescription)")
+#endif
+            }
         }
-        .ignoresSafeArea()
     }
+
 }
 
 private struct LaunchFlowView: View {
@@ -104,6 +114,33 @@ private struct LaunchFlowView: View {
 #endif
             await advertisingConsentManager.prepareForAds()
         }
+    }
+}
+
+/// Keeps the game visually landscape on iPad even when iPadOS presents its
+/// scene in portrait. iPhone continues to use the native landscape lock.
+private struct FixedLandscapeCanvas<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let isPortraitIPad = UIDevice.current.userInterfaceIdiom == .pad
+                && geometry.size.height > geometry.size.width
+
+            content
+                .frame(
+                    width: isPortraitIPad ? geometry.size.height : geometry.size.width,
+                    height: isPortraitIPad ? geometry.size.width : geometry.size.height
+                )
+                .rotationEffect(.degrees(isPortraitIPad ? 90 : 0))
+                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+        }
+        .ignoresSafeArea()
+        .persistentSystemOverlays(.hidden)
     }
 }
 

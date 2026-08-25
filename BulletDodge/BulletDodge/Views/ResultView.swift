@@ -84,7 +84,7 @@ struct ResultView: View {
 
             Text(rank.letter)
                 .font(.system(
-                    size: (rank.letter == "SS" ? 250 : 348) * scale,
+                    size: (rank.letter.count >= 2 ? 250 : 348) * scale,
                     weight: .black,
                     design: .serif
                 ))
@@ -386,33 +386,34 @@ private struct ResultRank {
     let color: Color
 
     init(survivalTime: TimeInterval) {
-        if survivalTime >= 68 {
-            letter = "SS"
+        let rank = PerformanceRank(survivalTime: survivalTime)
+        letter = rank.rawValue
+        switch rank.tier {
+        case .sss:
+            headline = L10n.text("rank.sss.headline")
+            message = L10n.text("rank.sss.message")
+            color = Color(red: 0.95, green: 0.28, blue: 0.50)
+        case .ss:
             headline = L10n.text("rank.ss.headline")
             message = L10n.text("rank.ss.message")
             color = GameTheme.violet
-        } else if survivalTime >= 45 {
-            letter = "S"
+        case .s:
             headline = L10n.text("rank.s.headline")
             message = L10n.text("rank.s.message")
             color = GameTheme.gold
-        } else if survivalTime >= 35 {
-            letter = "A"
+        case .a:
             headline = L10n.text("rank.a.headline")
             message = L10n.text("rank.a.message")
             color = GameTheme.mint
-        } else if survivalTime >= 20 {
-            letter = "B"
+        case .b:
             headline = L10n.text("rank.b.headline")
             message = L10n.text("rank.b.message")
             color = GameTheme.cyan
-        } else if survivalTime >= 10 {
-            letter = "C"
+        case .c:
             headline = L10n.text("rank.c.headline")
             message = L10n.text("rank.c.message")
             color = GameTheme.coral
-        } else {
-            letter = "D"
+        case .d:
             headline = L10n.text("rank.d.headline")
             message = L10n.text("rank.d.message")
             color = GameTheme.softText

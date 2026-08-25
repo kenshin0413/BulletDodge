@@ -25,6 +25,9 @@ struct GameView: View {
                 joystickMode: joystickMode,
                 playerSpeedSetting: playerSpeedSetting,
                 dodgeGuideEnabled: dodgeGuideEnabled,
+                attackRules: gameMode == .ranked
+                    ? RankingRules.attackRules(for: .current)
+                    : .legacy,
                 sessionStore: store,
                 onGameOver: onGameOver
             )
@@ -84,7 +87,7 @@ struct GameView: View {
             }
             Text(currentRankLetter)
                 .font(.system(
-                    size: currentRankLetter == "SS" ? 15 : 20,
+                    size: currentRankLetter.count >= 3 ? 13 : (currentRankLetter.count == 2 ? 16 : 20),
                     weight: .black,
                     design: .serif
                 ))
@@ -125,24 +128,18 @@ struct GameView: View {
     }
 
     private var currentRankLetter: String {
-        switch sessionStore.snapshot.survivalTime {
-        case 68...: "SS"
-        case 45...: "S"
-        case 35...: "A"
-        case 20...: "B"
-        case 10...: "C"
-        default: "D"
-        }
+        PerformanceRank(survivalTime: sessionStore.snapshot.survivalTime).rawValue
     }
 
     private var rankAccent: Color {
-        switch currentRankLetter {
-        case "SS": GameTheme.violet
-        case "S": GameTheme.gold
-        case "A": GameTheme.mint
-        case "B": GameTheme.cyan
-        case "C": GameTheme.coral
-        default: GameTheme.softText
+        switch PerformanceRank(survivalTime: sessionStore.snapshot.survivalTime).tier {
+        case .sss: Color(red: 0.95, green: 0.28, blue: 0.50)
+        case .ss: GameTheme.violet
+        case .s: GameTheme.gold
+        case .a: GameTheme.mint
+        case .b: GameTheme.cyan
+        case .c: GameTheme.coral
+        case .d: GameTheme.softText
         }
     }
 }

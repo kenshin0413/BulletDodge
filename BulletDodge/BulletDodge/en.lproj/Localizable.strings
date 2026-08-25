@@ -36,7 +36,7 @@
 "progress.recent_average" = "RECENT AVG.";
 "progress.recent_best" = "RECENT BEST";
 "progress.improvement_accessibility" = "Difference from previous ten runs: %.1f seconds";
-"progress.rank_distribution" = "Your Rank Distribution";
+"progress.rank_distribution" = "Rank Distribution (Last 40)";
 "progress.speed_records" = "Best by Speed";
 "progress.plays_count" = "%d RUNS";
 "progress.no_record" = "NO RECORD";
@@ -94,8 +94,10 @@
 "stats.rank" = "RANK";
 "stats.new" = "NEW";
 
-"rank.ss.headline" = "Beyond the limit";
-"rank.ss.message" = "You survived both Hypercharges. This highest rank belongs to the elite.";
+"rank.ss.headline" = "Challenge the limit";
+"rank.ss.message" = "You broke the 80-second barrier. Push onward into the ranks beyond.";
+"rank.sss.headline" = "Legendary territory";
+"rank.sss.message" = "You survived beyond 115 seconds. This ultimate rank belongs only to the world's finest players.";
 "rank.s.headline" = "Untouchable";
 "rank.s.message" = "You read the entire bullet storm. Now push for SS rank.";
 "rank.a.headline" = "Lightning reflexes";

@@ -36,7 +36,7 @@
 "progress.recent_average" = "直近平均";
 "progress.recent_best" = "直近ベスト";
 "progress.improvement_accessibility" = "前の10戦との差 %.1f秒";
-"progress.rank_distribution" = "自分のランク分布";
+"progress.rank_distribution" = "直近40戦のランク分布";
 "progress.speed_records" = "速度別ベスト";
 "progress.plays_count" = "%dプレイ";
 "progress.no_record" = "記録なし";
@@ -94,8 +94,10 @@
 "stats.rank" = "ランク";
 "stats.new" = "更新";
 
-"rank.ss.headline" = "極限を超えた";
-"rank.ss.message" = "二度のハイパーチャージを耐え切った。到達者だけの最高ランクだ。";
+"rank.ss.headline" = "極限への挑戦";
+"rank.ss.message" = "80秒の壁を越えた。さらに上の領域へ挑戦しよう。";
+"rank.sss.headline" = "伝説の領域";
+"rank.sss.message" = "115秒を超えて生き残った。世界最高峰のプレイヤーだけが届く究極ランクだ。";
 "rank.s.headline" = "圧倒的な回避だ";
 "rank.s.message" = "弾幕の流れを完全に読み切った。次はSSランクを狙おう。";
 "rank.a.headline" = "鋭い反応だった";
