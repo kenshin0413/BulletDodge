@@ -6,10 +6,13 @@ struct ResultView: View {
     let bestDodgedCount: Int
     let didSetTimeRecord: Bool
     let didSetDodgedRecord: Bool
+    let isRankedResult: Bool
+    let rankingShareContext: RankingShareContext?
     let onRetry: () -> Void
     let onHome: () -> Void
 
     @State private var appeared = false
+    @State private var sharePayload: RankingSharePayload?
 
     private var rank: ResultRank {
         ResultRank(survivalTime: result.survivalTime)
@@ -54,6 +57,11 @@ struct ResultView: View {
             withAnimation(.spring(response: 0.64, dampingFraction: 0.86)) {
                 appeared = true
             }
+        }
+        .sheet(item: $sharePayload) { payload in
+            RankingActivityView(
+                items: [payload.image, payload.message]
+            )
         }
     }
 
@@ -355,7 +363,53 @@ struct ResultView: View {
             }
             .buttonStyle(ResultPressButtonStyle())
             .frame(width: 240 * scale)
+
+            if isRankedResult {
+                Button(action: shareRankedResult) {
+                    Group {
+                        if rankingShareContext == nil {
+                            ProgressView()
+                                .tint(Color(red: 0.94, green: 0.90, blue: 0.79))
+                        } else {
+                            HStack(spacing: 8 * scale) {
+                                Image(systemName: "square.and.arrow.up.fill")
+                                Text(L10n.text("ranking.share.button"))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.72)
+                            }
+                        }
+                    }
+                    .font(.system(size: 27 * scale, weight: .black))
+                    .foregroundStyle(Color(red: 0.94, green: 0.90, blue: 0.79))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(GameTheme.coral.opacity(0.92), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(Color(red: 0.42, green: 0.09, blue: 0.10), lineWidth: 2 * scale)
+                    }
+                }
+                .buttonStyle(ResultPressButtonStyle())
+                .frame(width: 190 * scale)
+                .disabled(rankingShareContext == nil)
+                .accessibilityLabel(L10n.text("ranking.share.button"))
+            }
         }
+    }
+
+    @MainActor
+    private func shareRankedResult() {
+        guard let rankingShareContext else { return }
+        guard let image = RankingShareRenderer.render(
+            result: result,
+            context: rankingShareContext
+        ) else { return }
+        let message = L10n.format(
+            "ranking.share.message",
+            rankingShareContext.worldRank.map(String.init) ?? "—",
+            result.survivalTime,
+            AppStoreConfiguration.localizedProductURL.absoluteString
+        )
+        sharePayload = RankingSharePayload(image: image, message: message)
     }
 
     private var avoidanceRate: Int {
@@ -433,6 +487,14 @@ private struct ResultRank {
         bestDodgedCount: 369,
         didSetTimeRecord: false,
         didSetDodgedRecord: false,
+        isRankedResult: true,
+        rankingShareContext: RankingShareContext(
+            playerName: "トゲ避け開発者",
+            profileIcon: .developerRainbow,
+            worldRank: 2,
+            season: .current,
+            isPersonalBest: true
+        ),
         onRetry: {},
         onHome: {}
     )

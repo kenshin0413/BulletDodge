@@ -183,6 +183,17 @@
 "ranking.season.label" = "第%dシーズン・%@年%d月";
 "ranking.season.final_standings" = "シーズン最終順位";
 "ranking.season.champion_reward" = "シーズン1位報酬：限定アイコン";
+"ranking.season.reward_excluded" = "※シーズン報酬対象外";
+"ranking.season.remaining_days" = "シーズン終了まで %d日 %02d時間 %02d分";
+"ranking.season.remaining_time" = "シーズン終了まで %02d:%02d:%02d";
+"app.display_name" = "トゲ避け";
+"ranking.share.button" = "共有";
+"ranking.share.new_record" = "NEW PERSONAL BEST";
+"ranking.share.world_rank" = "世界ランキング";
+"ranking.share.survival" = "生存記録";
+"ranking.share.challenge" = "この弾幕を、何秒避けられる？";
+"ranking.share.download" = "App Storeで「トゲ避け」に挑戦";
+"ranking.share.message" = "「トゲ避け」で世界ランキング%@位、%.1f秒を記録！\nあなたは何秒避けられる？\n%@";
 "ranking.reward.title" = "ランキング戦を3戦追加";
 "ranking.reward.message" = "本日の無料3戦を使い切りました。リワード広告を最後まで見ると、ランキング戦をさらに3戦プレイできます。プレイ回数は毎日17時にリセットされます。";
 "ranking.reward.watch" = "広告を見て3戦追加";

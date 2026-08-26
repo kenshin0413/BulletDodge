@@ -210,8 +210,10 @@ enum GameConfig {
     static let enemyBobSpeed: CGFloat = 0.72
     static let enemyReferenceFollowRate: CGFloat = 1.15
 
-    static let joystickLeftInset: CGFloat = 112
-    static let joystickBottomInset: CGFloat = 104
+    // Reference control center: approximately (280, 932) in a 2622 x 1206
+    // capture, converted to the 430-point authored battle viewport.
+    static let joystickLeftInset: CGFloat = 100
+    static let joystickBottomInset: CGFloat = 98
 
     // 60 fps reference timing: the throw pose begins 10-11 frames before the
     // projectile separates, then settles back to idle within roughly 29 frames.
