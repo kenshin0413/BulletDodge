@@ -3,8 +3,10 @@ import SpriteKit
 final class VirtualJoystick: SKNode {
     private let baseNode: SKShapeNode
     private let stickNode: SKShapeNode
-    private let baseRadius: CGFloat = 64
-    private let stickRadius: CGFloat = 28
+    // Measured from the 2622 x 1206 Brawl Stars reference and converted to
+    // this scene's 430-point authored height.
+    private let baseRadius: CGFloat = 55
+    private let stickRadius: CGFloat = 23
     private let mode: JoystickMode
 
     private(set) var inputVector: CGVector = .zero

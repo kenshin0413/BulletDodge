@@ -8,6 +8,11 @@ enum AppStoreConfiguration {
         URL(string: "https://apps.apple.com/app/id\(appID)")!
     }
 
+    static var localizedProductURL: URL {
+        let storefront = Bundle.main.preferredLocalizations.first == "ja" ? "jp" : "us"
+        return URL(string: "https://apps.apple.com/\(storefront)/app/id\(appID)")!
+    }
+
     static var lookupURL: URL? {
         var components = URLComponents(string: "https://itunes.apple.com/lookup")
         components?.queryItems = [

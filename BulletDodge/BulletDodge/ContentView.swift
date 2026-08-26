@@ -18,7 +18,7 @@ struct ContentView: View {
     @State private var phase: AppPhase = DebugLaunchOptions.initialPhase
     @State private var latestResult: GameResult? = DebugLaunchOptions.previewResult
     @State private var gameSeed = UUID()
-    @State private var gameMode: GameMode = .practice
+    @State private var gameMode: GameMode = DebugLaunchOptions.previewGameMode
     @State private var isStartingRankedGame = false
     @State private var didSetTimeRecord = false
     @State private var didSetDodgedRecord = false
@@ -27,6 +27,7 @@ struct ContentView: View {
         "BULLETDODGE_SHOW_RANKED_REWARD_PROMPT"
     ] == "1"
     @State private var rewardedAdMessage: String?
+    @State private var presentsPersonalBestPlacement = false
 
     var body: some View {
         ZStack {
@@ -70,6 +71,7 @@ struct ContentView: View {
                 LeaderboardView(
                     service: rankingService,
                     rankedRunsRemaining: rewardAccessManager.remainingRankedRuns,
+                    presentsPersonalBestPlacement: presentsPersonalBestPlacement,
                     onPlayRanked: requestRankedGame,
                     onCreateAccount: showAccount,
                     onClose: showHome
@@ -104,8 +106,10 @@ struct ContentView: View {
                         bestDodgedCount: saveManager.bestDodgedCount,
                         didSetTimeRecord: didSetTimeRecord,
                         didSetDodgedRecord: didSetDodgedRecord,
+                        isRankedResult: gameMode == .ranked,
+                        rankingShareContext: rankingShareContext,
                         onRetry: retryGame,
-                        onHome: showHome
+                        onHome: handleResultHome
                     )
                     .transition(.opacity.combined(with: .scale(scale: 0.985)))
 
@@ -130,6 +134,22 @@ struct ContentView: View {
             await rankingService.prepare()
             await updateChecker.checkForUpdate()
 #if DEBUG
+            if ProcessInfo.processInfo.environment[
+                "BULLETDODGE_EXPORT_RANKED_SHARE_PREVIEW"
+            ] == "1",
+               let latestResult,
+               let rankingShareContext,
+               let image = RankingShareRenderer.render(
+                    result: latestResult,
+                    context: rankingShareContext
+               ),
+               let data = image.pngData(),
+               let documents = FileManager.default.urls(
+                    for: .documentDirectory,
+                    in: .userDomainMask
+               ).first {
+                try? data.write(to: documents.appendingPathComponent("ranking-share-preview.png"))
+            }
             if ProcessInfo.processInfo.environment["BULLETDODGE_SHOW_REVIEW_ALERT"] == "1" {
                 try? await Task.sleep(for: .seconds(1))
                 requestReview()
@@ -272,11 +292,44 @@ struct ContentView: View {
 
     private func showLeaderboard() {
         reviewRequestTask?.cancel()
+        presentsPersonalBestPlacement = false
         phase = .leaderboard
+    }
+
+    private func handleResultHome() {
+        guard gameMode == .ranked else {
+            showHome()
+            return
+        }
+
+        Task {
+            // The Firestore transaction may still be finishing when Home is
+            // tapped. Only route into the placement reveal after the server has
+            // confirmed that this run is a new ranked personal best.
+            for _ in 0..<200 {
+                switch rankingService.submissionState {
+                case .submitted(let isPersonalBest):
+                    guard isPersonalBest else {
+                        showHome()
+                        return
+                    }
+                    presentsPersonalBestPlacement = true
+                    phase = .leaderboard
+                    return
+                case .failed:
+                    showHome()
+                    return
+                case .idle, .submitting:
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+            }
+            showHome()
+        }
     }
 
     private func showHome() {
         reviewRequestTask?.cancel()
+        presentsPersonalBestPlacement = false
         phase = .home
     }
 
@@ -341,6 +394,24 @@ struct ContentView: View {
         }
         .allowsHitTesting(false)
     }
+
+    private var rankingShareContext: RankingShareContext? {
+        guard gameMode == .ranked,
+              let profile = rankingService.profile,
+              case .submitted(let isPersonalBest) = rankingService.submissionState else {
+            return nil
+        }
+        let worldRank = rankingService.leaderboard.firstIndex {
+            $0.id == profile.uid
+        }.map { $0 + 1 }
+        return RankingShareContext(
+            playerName: profile.displayName,
+            profileIcon: profile.icon,
+            worldRank: worldRank,
+            season: rankingService.currentSeason,
+            isPersonalBest: isPersonalBest
+        )
+    }
 }
 
 private enum DebugLaunchOptions {
@@ -350,6 +421,10 @@ private enum DebugLaunchOptions {
         "BULLETDODGE_SHOW_ACCOUNT"
     ] == "1"
     static let autoStartGame = ProcessInfo.processInfo.environment["BULLETDODGE_AUTO_START"] == "1"
+    static let showRankedSharePreview = ProcessInfo.processInfo.environment[
+        "BULLETDODGE_SHOW_RANKED_SHARE_PREVIEW"
+    ] == "1"
+    static let previewGameMode: GameMode = showRankedSharePreview ? .ranked : .practice
     static let initialPhase: AppPhase = showAccount
         ? .account
         : (showLeaderboard

@@ -12,6 +12,9 @@ const CHAMPION_ICONS = new Map([
   [4, "season_champion_4"],
   [5, "season_champion_5"],
 ]);
+const EXCLUDED_REWARD_UIDS = new Set([
+  "lNOc8N0menYh0CUS5aFGYH9wHXb2", // Official developer account
+]);
 
 function currentSeasonNumber(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -46,23 +49,25 @@ async function awardSeason(db, seasonNumber) {
       .orderBy("survivalMilliseconds", "desc")
       .orderBy("dodgedCount", "desc")
       .orderBy("achievedAt", "asc")
-      .limit(1)
+      .limit(100)
       .get();
 
-  if (winnerSnapshot.empty) {
+  const winner = winnerSnapshot.docs.find(
+      (entry) => !EXCLUDED_REWARD_UIDS.has(entry.id),
+  );
+  if (!winner) {
     const date = seasonDate(seasonNumber);
     await awardRef.set({
       seasonNumber,
       seasonYear: date.year,
       seasonMonth: date.month,
-      status: "no_entries",
+      status: "no_eligible_entries",
       checkedAt: FieldValue.serverTimestamp(),
     }, {merge: true});
-    console.log(`Season ${seasonNumber}: no entries; will check again tomorrow`);
+    console.log(`Season ${seasonNumber}: no eligible entries; will check again tomorrow`);
     return;
   }
 
-  const winner = winnerSnapshot.docs[0];
   const rewardRef = db.collection("profileRewards").doc(winner.id);
   const date = seasonDate(seasonNumber);
   await db.runTransaction(async (transaction) => {

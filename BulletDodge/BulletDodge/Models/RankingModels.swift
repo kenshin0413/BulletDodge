@@ -19,6 +19,14 @@ enum RankingRules {
     }
 }
 
+enum OfficialRankingAccounts {
+    static let developerUID = "lNOc8N0menYh0CUS5aFGYH9wHXb2"
+
+    static func isSeasonRewardExcluded(uid: String) -> Bool {
+        uid == developerUID
+    }
+}
+
 struct BurstWeights: Equatable {
     let single: Int
     let double: Int
@@ -130,6 +138,15 @@ struct RankingSeason: Identifiable, Hashable {
 
     var localizedLabel: String {
         L10n.format("ranking.season.label", number, String(year), month)
+    }
+
+    var endDate: Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = Self.timeZone
+        let start = calendar.date(
+            from: DateComponents(year: year, month: month, day: 1)
+        )!
+        return calendar.date(byAdding: .month, value: 1, to: start)!
     }
 
     static var current: RankingSeason {

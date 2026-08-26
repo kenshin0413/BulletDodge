@@ -183,6 +183,17 @@
 "ranking.season.label" = "Season %d · %@/%d";
 "ranking.season.final_standings" = "FINAL STANDINGS";
 "ranking.season.champion_reward" = "Season No. 1 Reward: Exclusive Icon";
+"ranking.season.reward_excluded" = "* Not eligible for season rewards";
+"ranking.season.remaining_days" = "Season ends in %dd %02dh %02dm";
+"ranking.season.remaining_time" = "Season ends in %02d:%02d:%02d";
+"app.display_name" = "SpikeDodge X";
+"ranking.share.button" = "Share";
+"ranking.share.new_record" = "NEW PERSONAL BEST";
+"ranking.share.world_rank" = "WORLD RANKING";
+"ranking.share.survival" = "SURVIVAL RECORD";
+"ranking.share.challenge" = "How long can you survive the spike storm?";
+"ranking.share.download" = "Challenge SpikeDodge X on the App Store";
+"ranking.share.message" = "I reached World Rank #%@ with %.1f seconds in SpikeDodge X!\nHow long can you survive?\n%@";
 "ranking.reward.title" = "Add 3 Ranked Battles";
 "ranking.reward.message" = "You have used today's 3 free ranked battles. Watch a rewarded ad to add 3 more. Your play count resets every day at 5:00 PM.";
 "ranking.reward.watch" = "Watch Ad for 3 Battles";

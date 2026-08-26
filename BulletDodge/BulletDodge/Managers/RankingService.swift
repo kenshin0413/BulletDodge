@@ -10,6 +10,7 @@ final class RankingService: ObservableObject {
     @Published private(set) var isPreparing = false
     @Published private(set) var isLoadingLeaderboard = false
     @Published private(set) var submissionState: RankingSubmissionState = .idle
+    @Published private(set) var previousRankForLatestSubmission: Int?
     @Published private(set) var lastError: String?
     @Published private(set) var selectedSeason = RankingSeason.current
 
@@ -36,7 +37,13 @@ final class RankingService: ObservableObject {
                 )
             }
             leaderboard = [
-                LeaderboardEntry(id: "one", displayName: "DodgeKing", icon: .crown, survivalMilliseconds: 92_840, dodgedCount: 241),
+                LeaderboardEntry(
+                    id: OfficialRankingAccounts.developerUID,
+                    displayName: "トゲ避け開発者",
+                    icon: .developerRainbow,
+                    survivalMilliseconds: 182_500,
+                    dodgedCount: 421
+                ),
                 LeaderboardEntry(id: "two", displayName: "カーブ名人", icon: .orbit, survivalMilliseconds: 81_320, dodgedCount: 213),
                 LeaderboardEntry(id: "preview-user", displayName: "CurveMaster", icon: previewIcon, survivalMilliseconds: 74_610, dodgedCount: 188),
                 LeaderboardEntry(id: "four", displayName: "トゲよけ侍", icon: .shield, survivalMilliseconds: 68_050, dodgedCount: 171),
@@ -49,6 +56,11 @@ final class RankingService: ObservableObject {
                 LeaderboardEntry(id: "eleven", displayName: "DodgeFlow", icon: .crown, survivalMilliseconds: 38_550, dodgedCount: 101),
                 LeaderboardEntry(id: "twelve", displayName: "カーブ読み", icon: .orbit, survivalMilliseconds: 35_120, dodgedCount: 94)
             ]
+            if ProcessInfo.processInfo.environment[
+                "BULLETDODGE_SHOW_RANKED_SHARE_PREVIEW"
+            ] == "1" {
+                submissionState = .submitted(isPersonalBest: true)
+            }
         }
 #else
         isPreview = false
@@ -238,6 +250,13 @@ final class RankingService: ObservableObject {
         submissionState = .submitting
         let score = max(0, Int((result.survivalTime * 1_000).rounded()))
         let season = currentSeason
+        // Preserve the player's actual position before this score changes the
+        // board. The result screen remains visible while this read completes.
+        selectedSeason = season
+        await loadLeaderboard(season: season)
+        previousRankForLatestSubmission = leaderboard.firstIndex {
+            $0.id == profile.uid
+        }.map { $0 + 1 }
         let entryRef = leaderboardEntryReference(for: season, uid: profile.uid)
         let runRef = database.collection("rankingRuns").document(profile.uid)
 

@@ -564,9 +564,14 @@ struct AccountView: View {
 struct LeaderboardView: View {
     @ObservedObject var service: RankingService
     let rankedRunsRemaining: Int
+    let presentsPersonalBestPlacement: Bool
     let onPlayRanked: () -> Void
     let onCreateAccount: () -> Void
     let onClose: () -> Void
+
+    @State private var didPlayPersonalBestPlacement = false
+    @State private var displayedLeaderboard: [LeaderboardEntry] = []
+    @State private var isAnimatingPersonalBestEntry = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -816,32 +821,52 @@ struct LeaderboardView: View {
                     .shadow(color: .black.opacity(0.18), radius: 4 * scale, y: 3 * scale)
                     .padding(.top, 9 * scale)
 
-                Menu {
-                    ForEach(service.availableSeasons) { season in
-                        Button {
-                            Task { await service.selectSeason(season) }
-                        } label: {
-                            if season == service.selectedSeason {
-                                Label(season.localizedLabel, systemImage: "checkmark")
-                            } else {
-                                Text(season.localizedLabel)
+                HStack(spacing: 10 * scale) {
+                    Menu {
+                        ForEach(service.availableSeasons) { season in
+                            Button {
+                                Task { await service.selectSeason(season) }
+                            } label: {
+                                if season == service.selectedSeason {
+                                    Label(season.localizedLabel, systemImage: "checkmark")
+                                } else {
+                                    Text(season.localizedLabel)
+                                }
                             }
                         }
+                    } label: {
+                        HStack(spacing: 7 * scale) {
+                            Image(systemName: "calendar")
+                            Text(service.selectedSeason.localizedLabel)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11 * scale, weight: .black))
+                        }
+                        .font(.system(size: 15 * scale, weight: .black, design: .rounded))
+                        .foregroundStyle(RankingPalette.ink)
+                        .padding(.horizontal, 14 * scale)
+                        .frame(minHeight: 34 * scale)
+                        .background(GameTheme.gold.opacity(0.20), in: Capsule())
+                        .overlay(Capsule().stroke(GameTheme.gold.opacity(0.65), lineWidth: 1.5 * scale))
                     }
-                } label: {
-                    HStack(spacing: 7 * scale) {
-                        Image(systemName: "calendar")
-                        Text(service.selectedSeason.localizedLabel)
+
+                    if service.isViewingCurrentSeason {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Label(
+                                seasonRemainingText(at: context.date),
+                                systemImage: "hourglass.bottomhalf.filled"
+                            )
+                            .font(.system(size: 14 * scale, weight: .black, design: .rounded))
+                            .foregroundStyle(GameTheme.coral)
+                            .monospacedDigit()
                             .lineLimit(1)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 11 * scale, weight: .black))
+                            .minimumScaleFactor(0.72)
+                            .padding(.horizontal, 13 * scale)
+                            .frame(minHeight: 31 * scale)
+                            .background(GameTheme.coral.opacity(0.10), in: Capsule())
+                            .overlay(Capsule().stroke(GameTheme.coral.opacity(0.45), lineWidth: 1.25 * scale))
+                        }
                     }
-                    .font(.system(size: 15 * scale, weight: .black, design: .rounded))
-                    .foregroundStyle(RankingPalette.ink)
-                    .padding(.horizontal, 14 * scale)
-                    .frame(minHeight: 34 * scale)
-                    .background(GameTheme.gold.opacity(0.20), in: Capsule())
-                    .overlay(Capsule().stroke(GameTheme.gold.opacity(0.65), lineWidth: 1.5 * scale))
                 }
                 .padding(.top, 8 * scale)
 
@@ -905,21 +930,93 @@ struct LeaderboardView: View {
                         description: Text(L10n.text("ranking.empty_message"))
                     )
                 } else {
-                    ScrollView(.vertical) {
-                        LazyVStack(spacing: 8 * scale) {
-                            ForEach(Array(service.leaderboard.enumerated()), id: \.element.id) { index, entry in
-                                rankingRow(entry: entry, rank: index + 1, scale: scale)
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical) {
+                            LazyVStack(spacing: 8 * scale) {
+                                ForEach(Array(displayedLeaderboard.enumerated()), id: \.element.id) { index, entry in
+                                    rankingRow(entry: entry, rank: index + 1, scale: scale)
+                                        .id(entry.id)
+                                        .scaleEffect(
+                                            isAnimatingPersonalBestEntry && entry.id == service.profile?.uid
+                                                ? 1.045
+                                                : 1
+                                        )
+                                        .zIndex(entry.id == service.profile?.uid ? 2 : 0)
+                                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                                }
                             }
+                            .padding(.horizontal, 7 * scale)
+                            .padding(.top, 2 * scale)
+                            .padding(.bottom, 18 * scale)
                         }
-                        .padding(.horizontal, 7 * scale)
-                        .padding(.top, 2 * scale)
-                        .padding(.bottom, 18 * scale)
+                        .scrollIndicators(.visible)
+                        .contentMargins(.trailing, 5 * scale, for: .scrollIndicators)
+                        .task(id: service.leaderboard) {
+                            await playPersonalBestPlacementIfNeeded(proxy: proxy)
+                        }
                     }
-                    .scrollIndicators(.visible)
-                    .contentMargins(.trailing, 5 * scale, for: .scrollIndicators)
                 }
             }
         }
+    }
+
+    @MainActor
+    private func playPersonalBestPlacementIfNeeded(proxy: ScrollViewProxy) async {
+        let finalLeaderboard = service.leaderboard
+        guard presentsPersonalBestPlacement,
+              !didPlayPersonalBestPlacement,
+              let uid = service.profile?.uid,
+              let finalIndex = finalLeaderboard.firstIndex(where: { $0.id == uid }) else {
+            displayedLeaderboard = finalLeaderboard
+            return
+        }
+
+        var previousLeaderboard = finalLeaderboard
+        let playerEntry = previousLeaderboard.remove(at: finalIndex)
+        if let previousRank = service.previousRankForLatestSubmission {
+            let previousIndex = min(max(0, previousRank - 1), previousLeaderboard.count)
+            previousLeaderboard.insert(playerEntry, at: previousIndex)
+            displayedLeaderboard = previousLeaderboard
+            await Task.yield()
+            proxy.scrollTo(uid, anchor: .center)
+            try? await Task.sleep(for: .milliseconds(550))
+        } else {
+            // A first-time participant enters just beneath the existing board,
+            // then the same row climbs to the newly earned position.
+            displayedLeaderboard = previousLeaderboard
+            await Task.yield()
+            if let lastID = previousLeaderboard.last?.id {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+            try? await Task.sleep(for: .milliseconds(320))
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                displayedLeaderboard.append(playerEntry)
+            }
+            try? await Task.sleep(for: .milliseconds(600))
+        }
+
+        isAnimatingPersonalBestEntry = true
+        withAnimation(.spring(response: 1.05, dampingFraction: 0.82)) {
+            displayedLeaderboard = finalLeaderboard
+            proxy.scrollTo(uid, anchor: .center)
+        }
+        try? await Task.sleep(for: .milliseconds(1_150))
+        withAnimation(.easeOut(duration: 0.22)) {
+            isAnimatingPersonalBestEntry = false
+        }
+        didPlayPersonalBestPlacement = true
+    }
+
+    private func seasonRemainingText(at date: Date) -> String {
+        let remaining = max(0, Int(service.currentSeason.endDate.timeIntervalSince(date)))
+        let days = remaining / 86_400
+        let hours = remaining % 86_400 / 3_600
+        let minutes = remaining % 3_600 / 60
+        let seconds = remaining % 60
+        if days > 0 {
+            return L10n.format("ranking.season.remaining_days", days, hours, minutes)
+        }
+        return L10n.format("ranking.season.remaining_time", hours, minutes, seconds)
     }
 
     private func rankingRow(entry: LeaderboardEntry, rank: Int, scale: CGFloat) -> some View {
@@ -933,6 +1030,15 @@ struct LeaderboardView: View {
                 .font(.system(size: 22 * scale, weight: .bold, design: .rounded))
                 .foregroundStyle(RankingPalette.ink)
                 .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            if OfficialRankingAccounts.isSeasonRewardExcluded(uid: entry.id) {
+                Text(L10n.text("ranking.season.reward_excluded"))
+                    .font(.system(size: 12 * scale, weight: .black, design: .rounded))
+                    .foregroundStyle(Color(red: 0.82, green: 0.04, blue: 0.09))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
             Spacer()
             Text(L10n.format("format.seconds_short", entry.survivalTime))
                 .font(.system(size: 24 * scale, weight: .black, design: .rounded))
