@@ -572,6 +572,7 @@ struct LeaderboardView: View {
     @State private var didPlayPersonalBestPlacement = false
     @State private var displayedLeaderboard: [LeaderboardEntry] = []
     @State private var isAnimatingPersonalBestEntry = false
+    @State private var selectedPublicProfileEntry: LeaderboardEntry?
 
     var body: some View {
         GeometryReader { geometry in
@@ -667,7 +668,20 @@ struct LeaderboardView: View {
         }
         .ignoresSafeArea()
         .statusBarHidden(true)
-        .task { await service.loadLeaderboard() }
+        .task {
+            await service.loadLeaderboard()
+#if DEBUG
+            if ProcessInfo.processInfo.environment["BULLETDODGE_SHOW_PUBLIC_PROFILE"] == "1",
+               selectedPublicProfileEntry == nil {
+                selectedPublicProfileEntry = service.leaderboard.first
+            }
+#endif
+        }
+        .sheet(item: $selectedPublicProfileEntry) { entry in
+            PublicRankingProfileView(service: service, entry: entry)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     @ViewBuilder
@@ -1072,6 +1086,12 @@ struct LeaderboardView: View {
         }
         .shadow(color: .white.opacity(0.58), radius: 1 * scale, y: -1 * scale)
         .shadow(color: .black.opacity(0.18), radius: 4 * scale, y: 3 * scale)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedPublicProfileEntry = entry
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(L10n.text("ranking.public_profile.open_hint"))
     }
 
     private func leaderboardRankBadge(for entry: LeaderboardEntry, scale: CGFloat) -> some View {
@@ -1126,6 +1146,241 @@ struct LeaderboardView: View {
         case 2: Color(red: 0.46, green: 0.52, blue: 0.55)
         default: Color(red: 0.67, green: 0.37, blue: 0.20)
         }
+    }
+}
+
+private struct PublicRankingProfileView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let service: RankingService
+    let entry: LeaderboardEntry
+
+    @State private var profile: PublicRankingProfile?
+    @State private var isLoading = true
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                GeometryReader { geometry in
+                    accountBackground(size: geometry.size)
+                }
+                .ignoresSafeArea()
+
+                if isLoading {
+                    ProgressView(L10n.text("ranking.public_profile.loading"))
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                } else if let profile {
+                    profileContent(profile)
+                } else {
+                    ContentUnavailableView(
+                        L10n.text("ranking.public_profile.error_title"),
+                        systemImage: "person.crop.circle.badge.exclamationmark",
+                        description: Text(L10n.text("ranking.public_profile.error_message"))
+                    )
+                }
+            }
+            .navigationTitle(L10n.text("ranking.public_profile.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(L10n.text("common.close")) { dismiss() }
+                        .fontWeight(.bold)
+                }
+            }
+        }
+        .task(id: entry.id) {
+            await loadProfile()
+        }
+    }
+
+    private func profileContent(_ profile: PublicRankingProfile) -> some View {
+        GeometryReader { geometry in
+            let scale = min(1, max(0.68, geometry.size.height / 650))
+            VStack(spacing: 12 * scale) {
+                HStack(spacing: 16 * scale) {
+                    RankingIconView(icon: profile.icon, size: 70 * scale)
+                    Text(profile.displayName)
+                        .font(.system(size: 24 * scale, weight: .black, design: .rounded))
+                        .foregroundStyle(RankingPalette.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.60)
+                        .frame(maxWidth: 175, alignment: .leading)
+
+                    HStack(spacing: 8 * scale) {
+                        profileStat(
+                            label: L10n.text("ranking.public_profile.best_world_rank"),
+                            value: profile.highestWorldRank.map { "#\($0)" } ?? "—",
+                            color: GameTheme.gold,
+                            scale: scale
+                        )
+                        profileStat(
+                            label: L10n.text("ranking.public_profile.best_time"),
+                            value: profile.bestSeasonRecord.map {
+                                L10n.format("format.seconds_short", $0.entry.survivalTime)
+                            } ?? "—",
+                            color: GameTheme.cyan,
+                            scale: scale
+                        )
+                        profileStat(
+                            label: L10n.text("ranking.public_profile.best_rank"),
+                            value: profile.bestSeasonRecord.map {
+                                PerformanceRank(survivalTime: $0.entry.survivalTime).rawValue
+                            } ?? "—",
+                            color: GameTheme.coral,
+                            scale: scale
+                        )
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
+                HStack(alignment: .top, spacing: 12 * scale) {
+                    profileSection(title: L10n.text("ranking.public_profile.achievements"), scale: scale) {
+                        VStack(spacing: 7 * scale) {
+                            let achievements = seasonAchievements(for: profile)
+                            if achievements.isEmpty {
+                                Label(
+                                    L10n.text("ranking.public_profile.achievement.none_finalized"),
+                                    systemImage: "hourglass"
+                                )
+                                .font(.system(size: 13 * scale, weight: .bold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 11 * scale)
+                                .frame(maxWidth: .infinity, minHeight: 38 * scale, alignment: .leading)
+                                .background(.white.opacity(0.46), in: RoundedRectangle(cornerRadius: 12 * scale))
+                            } else {
+                                ForEach(achievements) { achievement in
+                                    Label(achievement.title, systemImage: achievement.symbol)
+                                        .font(.system(size: 14 * scale, weight: .black, design: .rounded))
+                                        .foregroundStyle(RankingPalette.ink)
+                                        .padding(.horizontal, 11 * scale)
+                                        .frame(maxWidth: .infinity, minHeight: 38 * scale, alignment: .leading)
+                                        .background(.white.opacity(0.50), in: RoundedRectangle(cornerRadius: 12 * scale))
+                                        .overlay {
+                                            RoundedRectangle(cornerRadius: 12 * scale)
+                                                .stroke(GameTheme.gold.opacity(0.38), lineWidth: 1.25)
+                                        }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    profileSection(title: L10n.text("ranking.public_profile.season_history"), scale: scale) {
+                        VStack(spacing: 7 * scale) {
+                            ForEach(profile.seasonRecords) { record in
+                                HStack(spacing: 8 * scale) {
+                                    Text(shortSeasonLabel(record.season))
+                                        .font(.system(size: 14 * scale, weight: .black, design: .rounded))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 4)
+                                    Text(L10n.format(
+                                        "ranking.public_profile.season_record",
+                                        record.worldRank,
+                                        record.entry.survivalTime
+                                    ))
+                                    .font(.system(size: 12 * scale, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    Text(PerformanceRank(survivalTime: record.entry.survivalTime).rawValue)
+                                        .font(.system(size: 16 * scale, weight: .black, design: .rounded))
+                                        .foregroundStyle(GameTheme.coral)
+                                        .frame(width: 48 * scale, height: 28 * scale)
+                                        .background(GameTheme.coral.opacity(0.11), in: Capsule())
+                                }
+                                .padding(.horizontal, 11 * scale)
+                                .frame(minHeight: 38 * scale)
+                                .background(.white.opacity(0.42), in: RoundedRectangle(cornerRadius: 12 * scale))
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+            }
+            .padding(.horizontal, 16 * scale)
+            .padding(.vertical, 12 * scale)
+        }
+    }
+
+    private func profileStat(label: String, value: String, color: Color, scale: CGFloat) -> some View {
+        VStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 12 * scale, weight: .black, design: .rounded))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Text(value)
+                .font(.system(size: 24 * scale, weight: .black, design: .rounded))
+                .foregroundStyle(color)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, minHeight: 66 * scale, alignment: .center)
+        .background(.white.opacity(0.55), in: RoundedRectangle(cornerRadius: 14 * scale))
+        .overlay { RoundedRectangle(cornerRadius: 14 * scale).stroke(color.opacity(0.28), lineWidth: 1.25) }
+    }
+
+    private func profileSection<Content: View>(
+        title: String,
+        scale: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8 * scale) {
+            Text(title)
+                .font(.system(size: 18 * scale, weight: .black, design: .rounded))
+                .foregroundStyle(RankingPalette.ink)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private struct SeasonAchievement: Identifiable {
+        let id: String
+        let title: String
+        let symbol: String
+    }
+
+    private func seasonAchievements(for profile: PublicRankingProfile) -> [SeasonAchievement] {
+        profile.seasonRecords.compactMap { record in
+            guard Date() >= record.season.endDate else { return nil }
+            let key: String
+            let symbol: String
+            if record.isSeasonChampion {
+                key = "ranking.public_profile.achievement.season_champion"
+                symbol = "crown.fill"
+            } else if record.worldRank <= 3 {
+                key = "ranking.public_profile.achievement.season_top3"
+                symbol = "trophy.fill"
+            } else if record.worldRank <= 10 {
+                key = "ranking.public_profile.achievement.season_top10"
+                symbol = "medal.fill"
+            } else {
+                key = "ranking.public_profile.achievement.season_top100"
+                symbol = "chart.bar.fill"
+            }
+            return SeasonAchievement(
+                id: record.season.id,
+                title: L10n.format(key, shortSeasonLabel(record.season)),
+                symbol: symbol
+            )
+        }
+    }
+
+    private func shortSeasonLabel(_ season: RankingSeason) -> String {
+        L10n.format("ranking.public_profile.season_short", season.number)
+    }
+
+    @MainActor
+    private func loadProfile() async {
+        isLoading = true
+        do {
+            profile = try await service.loadPublicProfile(for: entry)
+        } catch {
+            profile = nil
+        }
+        isLoading = false
     }
 }
 

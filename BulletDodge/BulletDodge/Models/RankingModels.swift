@@ -255,6 +255,35 @@ struct LeaderboardEntry: Identifiable, Equatable {
     var survivalTime: TimeInterval { TimeInterval(survivalMilliseconds) / 1_000 }
 }
 
+struct PublicSeasonRecord: Identifiable, Equatable {
+    let season: RankingSeason
+    let worldRank: Int
+    let entry: LeaderboardEntry
+    let isSeasonChampion: Bool
+
+    var id: String { season.id }
+}
+
+struct PublicRankingProfile: Equatable {
+    let uid: String
+    let displayName: String
+    let icon: ProfileIcon
+    let seasonRecords: [PublicSeasonRecord]
+
+    var bestSeasonRecord: PublicSeasonRecord? {
+        seasonRecords.max {
+            if $0.entry.survivalMilliseconds == $1.entry.survivalMilliseconds {
+                return $0.entry.dodgedCount < $1.entry.dodgedCount
+            }
+            return $0.entry.survivalMilliseconds < $1.entry.survivalMilliseconds
+        }
+    }
+
+    var highestWorldRank: Int? {
+        seasonRecords.map(\.worldRank).min()
+    }
+}
+
 enum RankingSubmissionState: Equatable {
     case idle
     case submitting
