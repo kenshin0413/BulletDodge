@@ -320,6 +320,7 @@ final class RankingService: ObservableObject {
                 .document(season.id).collection("entries")
                 .order(by: "survivalMilliseconds", descending: true)
                 .order(by: "dodgedCount", descending: true)
+                .order(by: "achievedAt", descending: false)
                 .limit(to: 100)
                 .getDocuments()
             let entries: [LeaderboardEntry] = snapshot.documents.compactMap { document -> LeaderboardEntry? in
@@ -340,6 +341,51 @@ final class RankingService: ObservableObject {
         } catch {
             lastError = userMessage(for: error)
         }
+    }
+
+    func loadPublicProfile(for selectedEntry: LeaderboardEntry) async throws -> PublicRankingProfile {
+        var records: [PublicSeasonRecord] = []
+
+        for season in availableSeasons {
+            let entries: [LeaderboardEntry]
+            if season == selectedSeason, !leaderboard.isEmpty {
+                entries = leaderboard
+            } else if isPreview {
+                entries = season == selectedSeason ? leaderboard : []
+            } else {
+                let snapshot = try await database.collection("leaderboards")
+                    .document(season.id).collection("entries")
+                    .order(by: "survivalMilliseconds", descending: true)
+                    .order(by: "dodgedCount", descending: true)
+                    .order(by: "achievedAt", descending: false)
+                    .limit(to: 100)
+                    .getDocuments()
+                entries = snapshot.documents.compactMap(Self.leaderboardEntry(from:))
+            }
+
+            guard let index = entries.firstIndex(where: { $0.id == selectedEntry.id }) else {
+                continue
+            }
+            let seasonHasEnded = Date() >= season.endDate
+            let eligibleWinnerID = entries.first(where: {
+                !OfficialRankingAccounts.isSeasonRewardExcluded(uid: $0.id)
+            })?.id
+            records.append(
+                PublicSeasonRecord(
+                    season: season,
+                    worldRank: index + 1,
+                    entry: entries[index],
+                    isSeasonChampion: seasonHasEnded && eligibleWinnerID == selectedEntry.id
+                )
+            )
+        }
+
+        return PublicRankingProfile(
+            uid: selectedEntry.id,
+            displayName: selectedEntry.displayName,
+            icon: selectedEntry.icon,
+            seasonRecords: records
+        )
     }
 
     func clearError() { lastError = nil }
@@ -380,6 +426,20 @@ final class RankingService: ObservableObject {
             .document(season.id)
             .collection("entries")
             .document(uid)
+    }
+
+    private static func leaderboardEntry(from document: QueryDocumentSnapshot) -> LeaderboardEntry? {
+        let data = document.data()
+        guard let name = data["displayName"] as? String,
+              let milliseconds = data["survivalMilliseconds"] as? Int,
+              let dodged = data["dodgedCount"] as? Int else { return nil }
+        return LeaderboardEntry(
+            id: document.documentID,
+            displayName: name,
+            icon: ProfileIcon(rawValue: data["iconID"] as? String ?? "") ?? .shield,
+            survivalMilliseconds: milliseconds,
+            dodgedCount: dodged
+        )
     }
 
     private func userMessage(for error: Error) -> String {

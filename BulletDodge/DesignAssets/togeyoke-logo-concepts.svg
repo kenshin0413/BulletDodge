@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1600">
+  <rect width="1200" height="1600" fill="#f3eddf"/>
+  <style>
+    .tile{fill:#faf6ec;stroke:#d8ccb5;stroke-width:2}
+    .label{font:700 28px -apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;fill:#1b2423}
+    .caption{font:500 18px -apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;fill:#68706b}
+    .red{fill:#c93436}.teal{fill:#0d6770}.ink{fill:#17201f}.ivory{fill:#faf6ec}
+    .line-red{fill:none;stroke:#c93436;stroke-width:34;stroke-linecap:round;stroke-linejoin:round}
+    .line-teal{fill:none;stroke:#0d6770;stroke-width:30;stroke-linecap:round;stroke-linejoin:round}
+  </style>
+
+  <text x="70" y="72" class="label" font-size="38">トゲ避け — LOGO MARK STUDY</text>
+  <text x="70" y="108" class="caption">赤い結晶トゲ × カーブ回避軌道 / flat vector</text>
+
+  <!-- A: orbit -->
+  <g transform="translate(70 155)">
+    <rect class="tile" width="500" height="400" rx="30"/>
+    <g transform="translate(250 190)">
+      <path class="line-teal" d="M-138 42C-155-68-72-142 35-130C112-121 151-70 146-12"/>
+      <path class="red" d="M134-54L184-8L128 31L137 4L91-7Z"/>
+      <circle class="ink" cx="-116" cy="60" r="20"/>
+    </g>
+    <text x="26" y="354" class="label">A  ORBIT</text>
+    <text x="170" y="354" class="caption">弾道を外側から回避</text>
+  </g>
+
+  <!-- B: gate -->
+  <g transform="translate(630 155)">
+    <rect class="tile" width="500" height="400" rx="30"/>
+    <g transform="translate(250 184)">
+      <path class="red" d="M-146-132L-38-40L-84-20L-45 10L-138 138L-105 28L-143-4L-108-38Z"/>
+      <path class="red" d="M146-132L38-40L84-20L45 10L138 138L105 28L143-4L108-38Z"/>
+      <path class="line-teal" d="M5-112C-48-62 43-26-7 27C-48 70-7 94 7 119"/>
+    </g>
+    <text x="26" y="354" class="label">B  GATE</text>
+    <text x="163" y="354" class="caption">二方向のトゲを縫う</text>
+  </g>
+
+  <!-- C: split diamond -->
+  <g transform="translate(70 610)">
+    <rect class="tile" width="500" height="400" rx="30"/>
+    <g transform="translate(250 184) rotate(45)">
+      <path class="red" d="M-124-124H20C-29-67-29-16 20 23H-124Z"/>
+      <path class="red" d="M124 124H-20C29 67 29 16-20-23H124Z"/>
+      <path class="line-teal" d="M10-122C-53-67 51-25-10 31C-48 66 2 100 15 122"/>
+    </g>
+    <text x="26" y="354" class="label">C  SPLIT</text>
+    <text x="166" y="354" class="caption">結晶を割る回避ライン</text>
+  </g>
+
+  <!-- D: near miss -->
+  <g transform="translate(630 610)">
+    <rect class="tile" width="500" height="400" rx="30"/>
+    <g transform="translate(250 186)">
+      <path class="red" d="M-154-63L53-104L119-58L49-16L66-47L-102-27Z"/>
+      <path class="line-teal" d="M-129 93C-40 108 44 88 78 27"/>
+      <circle class="ink" cx="98" cy="5" r="19"/>
+    </g>
+    <text x="26" y="354" class="label">D  NEAR MISS</text>
+    <text x="238" y="354" class="caption">紙一重の瞬間</text>
+  </g>
+
+  <!-- E: compass -->
+  <g transform="translate(70 1065)">
+    <rect class="tile" width="500" height="400" rx="30"/>
+    <g transform="translate(250 183)">
+      <circle cx="0" cy="0" r="128" fill="none" stroke="#17201f" stroke-width="22" stroke-dasharray="620 185" transform="rotate(-32)"/>
+      <path class="red" d="M5-156L48-67L7-85L-36-60Z"/>
+      <path class="line-teal" d="M-86 69C-22 103 47 73 69 12"/>
+      <circle class="ink" cx="77" cy="-7" r="17"/>
+    </g>
+    <text x="26" y="354" class="label">E  COMPASS</text>
+    <text x="220" y="354" class="caption">天文台の軌道</text>
+  </g>
+
+  <!-- F: aperture -->
+  <g transform="translate(630 1065)">
+    <rect class="tile" width="500" height="400" rx="30"/>
+    <g transform="translate(250 184)">
+      <path class="red" d="M0-151L52-54L15-24L-17-62Z"/>
+      <path class="red" d="M-131 92L-30 48L0 79L-82 132Z"/>
+      <path class="red" d="M132 92L30 48L0 79L82 132Z"/>
+      <path class="line-teal" d="M-86-17C-26-50 34-37 73 7C40 35 4 52-48 48"/>
+      <circle class="ink" cx="-66" cy="-5" r="17"/>
+    </g>
+    <text x="26" y="354" class="label">F  APERTURE</text>
+    <text x="223" y="354" class="caption">三方向から回避</text>
+  </g>
+</svg>
